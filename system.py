@@ -971,6 +971,29 @@ def comprar_ingresso(movie):
                 movie.total_tickets_sold += 1
                 movie.total_revenue += total_price
                 ticket.generate_qr_code()
+                notification_service.send_notification(
+                usuario_logado,
+                PAYMENT_SUCCESS,
+                f"Payment confirmed: R$ {total_price:.2f}",
+                {
+                    "movie": movie.name,
+                    "time": showtime_selecionado.time,
+                    "room": showtime_selecionado.screen_number,
+                    "seat": assento_selecionado.row_and_number,
+                    "amount": f"{total_price:.2f}",
+                },
+                )
+                notification_service.send_notification(
+                    usuario_logado,
+                    BOOKING_CONFIRMED,
+                    f"Booking confirmed for '{movie.name}'",
+                    {
+                        "movie": movie.name,
+                        "time": showtime_selecionado.time,
+                        "room": showtime_selecionado.screen_number,
+                        "seat": assento_selecionado.row_and_number,
+                    },
+                )
             else:
                 print("Payment failed. Releasing seat.")
                 assento_selecionado.release(usuario_logado)
