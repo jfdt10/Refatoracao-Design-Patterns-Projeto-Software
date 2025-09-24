@@ -4,14 +4,18 @@ This project is a system for selling movie tickets and popcorn combos, developed
 Functions that have been implemented:
 * Cinema and Movie Listings
 * Seat Selection and Booking
-* Payment Processing
-* User Account Management
+* Payment Processing(Adicionado-Refatoração Melhorado a Usabilidade(simulação mais realista))
+* User Account Management(Melhorado-Refatoração Adicionado Admin Painel)
 * Booking History and Cancellations
-* Promotions and Discounts
-* Real-Time Seat Availability
+* Promotions and Discounts(Melhorado-Refatoração)
+* Real-Time Seat Availability(Melhorado-Refatoração)
 * Customer Reviews and Ratings
 * Ticket and popcorn combo
 * Movie times and theaters
+* Notification and Alerts: Sending notifications for new releases and booking confirmations.(Adicionado-Refatoração)
+* Mobile Ticketing: Generating mobile tickets for ease of access(QR CODE MOBILE)(Adicionado-Refatoração)
+
+
 
 
 ### Applied OOP Concepts
@@ -34,3 +38,8 @@ The project was built based on important pillars of Object-Oriented Programming:
 - The program will only stop running when you select the “exit” option.
 
 ---
+
+# How to run the program
+- pip install requirements.txt
+- cd Refatoracao-Design-Patterns-Projeto-Software
+- python system.py
