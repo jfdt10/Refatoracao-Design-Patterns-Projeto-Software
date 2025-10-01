@@ -3,6 +3,8 @@ import qrcode
 from datetime import datetime, timedelta
 import uuid
 from abc import ABC, abstractmethod
+import threading
+
 
 BOOKING_CONFIRMED = "booking_confirmed"
 NEW_MOVIE = "new_movie"
@@ -14,7 +16,20 @@ PAYMENT_SUCCESS = "payment_success"
 PERCENTAGE = "percentage"
 FIXED_AMOUNT = "fixed_amount"
 
-class NotificationService:
+
+#------ Singleton via Metaclass -----
+class MetaSingleton(type):
+    _instances = {}
+    _lock = threading.Lock()
+
+    def __call__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls not in cls._instances:
+                instance = super().__call__(*args, **kwargs)
+                cls._instances[cls] = instance
+        return cls._instances[cls]
+#------ Singleton via Metaclass -----
+class NotificationService(metaclass=MetaSingleton):
     def __init__(self):
         self.notifications = []
     
@@ -102,11 +117,12 @@ class Coupon:
     
     def use(self):
         self.uses_count += 1
-
-class PromotionManager:
+#------ Singleton via Metaclass -----
+class PromotionManager(metaclass=MetaSingleton):
     def __init__(self):
-        self.coupons = {}
-        self.initialize_default_coupons()
+        if not hasattr(self, 'coupons'):
+            self.coupons = {}
+            self.initialize_default_coupons()
     
     def initialize_default_coupons(self):
         self.add_coupon(Coupon("STUDENT50", PERCENTAGE, 50, 
@@ -115,7 +131,8 @@ class PromotionManager:
                                "R$10 off for new users", min_purchase=20, max_uses=1))
         self.add_coupon(Coupon("CINEMA20", PERCENTAGE, 20,
                                "20% off on all tickets", 
-                               valid_until=datetime.now() + timedelta(days=30)))   
+                               valid_until=datetime.now() + timedelta(days=30)))
+ 
     def add_coupon(self, coupon):
         self.coupons[coupon.code] = coupon
     
@@ -125,25 +142,563 @@ class PromotionManager:
     def list_active_coupons(self):
         return [c for c in self.coupons.values() if c.is_valid()]
 
-
-class PRODUCT(ABC):
-
+#------Abstract Factory--------------
+class AbstractFactory(ABC):
     @abstractmethod
-    def __init__(self, name, price):
-        self.name = name  
+    def create_product(self, product_type:str, **kwargs):
+        pass 
+
+    def process_purchase(self, product:str, **kwargs):
+        product = self.create_product(product, **kwargs)
+        print(f"Processing purchase for {product.name}...")
+        return product
+    
+#--- Factory Concreta---------
+class StandardFactory(AbstractFactory):
+    def create_product(self, product_type:str, **kwargs):
+        if product_type == "ticket":
+            return self.create_ticket(**kwargs) # factory method
+        elif product_type == "popcorn":
+            return self.create_popcorn(**kwargs) # factory method
+        elif product_type == "candy":
+            return self.create_candy(**kwargs)
+        elif product_type == "nachos":
+            return self.create_nachos(**kwargs)
+        elif product_type == "hotdog":
+            return self.create_hotdog(**kwargs)
+        elif product_type == "soda":
+            return self.create_soda(**kwargs)
+        elif product_type == "juice":
+            return self.create_juice(**kwargs)
+        elif product_type == "water":
+            return self.create_water(**kwargs)
+        else:
+            raise ValueError(f"Unknown product type: {product_type}")
+     
+    def create_ticket(self, **kwargs):
+        return TICKET(
+            kwargs.get("name", "Standard Ticket"),
+            kwargs.get("price", 25.0),
+            kwargs.get("seat"),
+            kwargs.get("showtime")
+        )
+    
+    def create_popcorn(self, **kwargs):
+        return POPCORN(
+            kwargs.get("name", "Popcorn"),
+            kwargs.get("price", 5.0),
+            kwargs.get("size", "M")
+        )
+    
+    def create_candy(self, **kwargs):
+        return CANDY(
+            kwargs.get("name", "Candy"),
+            kwargs.get("price", 6.0),
+            kwargs.get("type", "Mixed")
+        )
+    
+    def create_nachos(self, **kwargs):
+        return NACHOS(
+            kwargs.get("name", "Nachos"),
+            kwargs.get("price", 10.0),
+            kwargs.get("topping", "cheese")
+        )
+    
+    def create_hotdog(self, **kwargs):
+        return HOTDOG(
+            kwargs.get("name", "Hot Dog"),
+            kwargs.get("price", 12.0),
+            kwargs.get("size", "regular")
+        )
+    
+    def create_soda(self, **kwargs):
+        return SODA(
+            kwargs.get("name", "Soda"),
+            kwargs.get("price", 4.0),
+            kwargs.get("size", "M")
+        )
+    
+    def create_juice(self, **kwargs):
+        return JUICE(
+            kwargs.get("name", "Juice"),
+            kwargs.get("price", 5.0),
+            kwargs.get("size", "M")
+        )
+    
+    def create_water(self, **kwargs):
+        return WATER(
+            kwargs.get("name", "Water"),
+            kwargs.get("price", 3.0),
+            kwargs.get("size", "M")
+        )
+#--- Factory Concreta----------
+class StudentFactory(AbstractFactory):
+    def create_product(self, product_type:str, **kwargs):
+        if product_type == "ticket":
+            kwargs["price"] = kwargs.get("price", 25.0) * 0.5
+            kwargs["name"] = kwargs.get("name", "Ticket") + " (Student)"
+        elif product_type == "popcorn":
+            kwargs["price"] = kwargs.get("price", 5.0) * 0.5
+            kwargs["name"] = kwargs.get("name", "Popcorn") + " (Student)"
+        elif product_type in ["candy", "nachos", "hotdog"]:
+            kwargs["price"] = kwargs.get("price", 8.0) * 0.5
+            kwargs["name"] = kwargs.get("name", product_type.title()) + " (Student)"
+        elif product_type in ["soda", "juice", "water"]:
+            kwargs["price"] = kwargs.get("price", 4.0) * 0.5
+            kwargs["name"] = kwargs.get("name", product_type.title()) + " (Student)"
+        standard_factory = StandardFactory()
+        return standard_factory.create_product(product_type, **kwargs)
+
+#-- Factory Concreta----------
+class VIPFactory(AbstractFactory):
+    def create_product(self, product_type: str, **kwargs):
+        if product_type == "ticket":
+            kwargs["price"] = kwargs.get("price", 25.0) * 1.5
+            kwargs["name"] = kwargs.get("name", "Ticket") + " (VIP)"
+        elif product_type == "popcorn":
+            kwargs["price"] = kwargs.get("price", 5.0) * 0.5
+            kwargs["name"] = kwargs.get("name", "Popcorn") + " (VIP Discount 50 %)"
+        elif product_type in ["candy", "nachos", "hotdog"]:
+            kwargs["price"] = kwargs.get("price", 8.0) * 0.5
+            kwargs["name"] = kwargs.get("name", product_type.title()) + " (VIP Discount 50 %)"
+        elif product_type in ["soda", "juice", "water"]:
+            kwargs["price"] = kwargs.get("price", 4.0) * 0.5
+            kwargs["name"] = kwargs.get("name", product_type.title()) + " (VIP Discount 50 %)"
+        standard_factory = StandardFactory()
+        return standard_factory.create_product(product_type, **kwargs)
+
+#----Factory Method-------
+def get_factory_for_user(user, ticket_type: str = None) -> AbstractFactory:
+    if ticket_type:
+        ticket_lower = ticket_type.lower()
+        if ticket_lower == 'student':
+            return StudentFactory()
+        elif ticket_lower == 'vip':
+            return VIPFactory()
+    
+    if hasattr(user, 'user_type'):
+        if user.user_type == 'student':
+            return StudentFactory()
+        elif user.user_type == 'vip':
+            return VIPFactory()
+    
+    return StandardFactory()
+
+#----- Produtos Abstratos------
+class FOOD(ABC):
+    def __init__(self, name, price, size_or_type):
+        self.name = name
         self.price = price
+        self.size_or_type = size_or_type
 
     @abstractmethod
     def purchase_product(self):
         pass
-
     @abstractmethod
     def cancel_purchase(self):
         pass
-
+    @abstractmethod
+    def calculate_food_price(self):
+        pass
     @abstractmethod
     def promotion(self, coupon=None):
         pass
+
+class DRINK(ABC):
+    def __init__(self, name, price, size):
+        self.name = name
+        self.price = price
+        self.size = size
+    
+    @abstractmethod
+    def purchase_product(self):
+        pass
+    @abstractmethod
+    def cancel_purchase(self):
+        pass
+    @abstractmethod
+    def calculate_drink_price(self):
+        pass
+    @abstractmethod
+    def promotion(self, coupon=None):
+        pass
+
+class SERVICE(ABC):
+    def __init__(self, name, price):
+        self.name = name
+        self.price = price
+    @abstractmethod
+    def purchase_product(self):
+        pass
+    @abstractmethod
+    def cancel_purchase(self):
+        pass
+    @abstractmethod
+    def generate_service_confirmation(self):
+        pass
+    @abstractmethod
+    def promotion(self, coupon=None):
+        pass
+#----- Produtos Concretos -----
+
+class POPCORN(FOOD):
+    def __init__(self, name:str, price:float, size:str):
+        super().__init__(name, price,size_or_type=size)
+        self.size = size
+    def calculate_food_price(self):
+        size_prices = {"S": 4.5, "M": 6.0, "L": 7.5}
+        base_price = size_prices.get(self.size.upper(), 5.0)
+        has_discount = "(Student" in self.name or "(VIP" in self.name or "(VIP Discount 50 %" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_food_price()
+        size_name = {"S": "Small Popcorn", "M": "Medium Popcorn", "L": "Large Popcorn"}.get(self.size.upper(), "Medium Popcorn")
+        print(f"Popcorn purchased: {self.name} ({size_name}) - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Popcorn of size {self.size} purchase cancelled.")    
+
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f" Food coupon applied to popcorn! Discount: R${discount:.2f}")
+        return self.price
+        
+class TICKET(SERVICE):
+    def __init__(self, name, price, seat, showtime):
+        super().__init__(name, price)
+        self.seat = seat
+        self.showtime = showtime
+        self.extras = []
+    
+    def purchase_product(self):
+        print(f"Ticket for seat {self.seat.row_and_number} purchased successfully.")
+    
+    def cancel_purchase(self):
+        print(f"Ticket for seat {self.seat.row_and_number} cancelled.")
+        self.seat.release()  
+
+    def generate_service_confirmation(self):
+        return self.generate_qr_code()
+
+    def promotion(self, coupon=None):
+        if coupon:
+            cinema_name = None 
+            movie_name = self.showtime.movie.name
+            user_type = "student" if "student" in self.name.lower() else "regular"
+            
+            if coupon.can_apply(self.price, cinema_name, movie_name, user_type):
+                new_price, discount = coupon.apply_discount(self.price)
+                self.price = new_price
+                print(f" Service Coupon '{coupon.code}' applied to ticket! Discount: R${discount:.2f}")
+            else:
+                print(f" Service Coupon '{coupon.code}' cannot be applied to this purchase.")
+        return self.price
+
+    def generate_qr_code(self):
+        data = f"""
+        Ticket for seat {self.seat.row_and_number}
+        Movie: {self.showtime.movie.name}
+        Time: {self.showtime.time}
+        Room: {self.showtime.screen_number}
+        """
+        qr = qrcode.QRCode(box_size=2)
+        qr.add_data(data)
+        print("\n📲 Mobile Ticket With QR Code:")
+        print("-"*40)
+        print(data.strip())
+        print("-"*40)
+        qr.print_ascii(invert=True)
+        print("-"*40)
+
+class CANDY(FOOD):
+    def __init__(self, name: str, price: float, candy_type: str):
+        super().__init__(name, price, size_or_type=candy_type)
+        self.candy_type = candy_type
+    
+    def calculate_food_price(self):
+        base_price = 6.0  
+        has_discount = "(Student" in self.name or "(VIP" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_food_price()
+        print(f"Candy purchased: {self.name} ({self.candy_type}) - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Candy '{self.candy_type}' purchase cancelled.")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Food coupon applied to candy! Discount: R${discount:.2f}")
+        return self.price
+class NACHOS(FOOD):
+    def __init__(self, name: str, price: float, topping: str = "cheese"):
+        super().__init__(name, price, size_or_type=topping)
+        self.topping = topping
+    
+    def calculate_food_price(self):
+        base_price = 10.0
+        topping_extras = {"cheese": 0, "jalapeño": 2.0, "guacamole": 3.0}
+        extra_cost = topping_extras.get(self.topping.lower(), 0)
+        total_price = base_price + extra_cost
+        
+        has_discount = "(Student" in self.name or "(VIP" in self.name
+        return total_price * 0.5 if has_discount else max(self.price, total_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_food_price()
+        print(f"Nachos purchased: {self.name} with {self.topping} - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Nachos with {self.topping} purchase cancelled.")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Food coupon applied to Nachos! Discount: R${discount:.2f}")
+        return self.price
+class HOTDOG(FOOD):
+    def __init__(self, name: str, price: float, size: str = "regular"):
+        super().__init__(name, price, size_or_type=size)
+        self.size = size
+    
+    def calculate_food_price(self):
+        size_prices = {"small": 10.0, "regular": 12.0, "jumbo": 15.0}
+        base_price = size_prices.get(self.size.lower(), 12.0)
+        
+        has_discount = "(Student" in self.name or "(VIP" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_food_price()
+        print(f"Hot Dog purchased: {self.name} ({self.size}) - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Hot Dog ({self.size}) purchase cancelled.")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Food coupon applied to Hot Dog! Discount: R${discount:.2f}")
+        return self.price
+class SODA(DRINK):
+    def __init__(self, name: str, price: float, size: str):
+        super().__init__(name, price, size)
+    
+    def calculate_drink_price(self):
+        size_prices = {"S": 3.0, "M": 4.0, "L": 5.0}
+        base_price = size_prices.get(self.size.upper(), 4.0)
+        has_discount = "(Student" in self.name or "(VIP" in self.name or "(VIP Discount 50 %" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_drink_price()
+        size_name = {"S": "Small Soda", "M": "Medium Soda", "L": "Large Soda"}.get(self.size.upper(), "Medium Soda")
+        print(f"Soda purchased: {self.name} ({size_name}) - R$ {self.price:.2f}")
+        return self.price
+
+    def cancel_purchase(self):
+        print(f"Soda purchase cancelled: {self.name}")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Drink coupon applied to soda! Discount: R${discount:.2f}")
+        return self.price
+    
+class JUICE(DRINK):
+    def __init__(self, name: str, price: float, size: str):
+        super().__init__(name, price, size)
+    
+    def calculate_drink_price(self):
+        size_prices = {"S": 5.0, "M": 6.5, "L": 8.0}
+        base_price = size_prices.get(self.size.upper(), 6.0)
+        has_discount = "(Student" in self.name or "(VIP" in self.name or "(VIP Discount 50 %" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_drink_price()
+        size_name = {"S": "Small Juice", "M": "Medium Juice", "L": "Large Juice"}.get(self.size.upper(), "Medium Juice")
+        print(f"Juice purchased: {self.name} ({size_name}) - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Juice of size {self.size} purchase cancelled.")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Drink coupon applied to juice! Discount: R${discount:.2f}")
+        return self.price
+    
+class WATER(DRINK):
+    def __init__(self, name: str, price: float, size: str):
+        super().__init__(name, price, size)
+
+    def calculate_drink_price(self):
+        size_prices = {"S": 3.0, "M": 4.0, "L": 5.0}
+        base_price = size_prices.get(self.size.upper(), 4.0)
+        has_discount = "(Student" in self.name or "(VIP" in self.name or "(VIP Discount 50 %" in self.name
+        return base_price * 0.5 if has_discount else max(self.price, base_price)
+    
+    def purchase_product(self):
+        self.price = self.calculate_drink_price()
+        size_name = {"S": "Small Water", "M": "Medium Water", "L": "Large Water"}.get(self.size.upper(), "Medium Water")
+        print(f"Water purchased: {self.name} ({size_name}) - R$ {self.price:.2f}")
+        return self.price
+    
+    def cancel_purchase(self):
+        print(f"Water of size {self.size} purchase cancelled.")
+    
+    def promotion(self, coupon=None):
+        if coupon and coupon.can_apply(self.price):
+            new_price, discount = coupon.apply_discount(self.price)
+            self.price = new_price
+            print(f"Drink coupon applied to water! Discount: R${discount:.2f}")
+        return self.price
+    
+#----- Builder ------
+class ComboBuilder:
+    def __init__(self, user):
+        self.user = user
+        self.factory = get_factory_for_user(user)
+        self.ticket = None
+        self.extras = []
+        self.total_price = 0.0
+
+    def add_ticket(self, ticket_type, seat, showtime, price=25.0):
+        self.ticket = create_ticket_with_factory(self.user, ticket_type, seat, showtime, price=price)
+        self.factory = get_factory_for_user(self.user, ticket_type)
+        self.total_price += self.ticket.price
+        return self
+    
+    def add_popcorn(self, size="M", price=5.0):
+        popcorn = self.factory.create_product("popcorn", size=size)
+        popcorn.purchase_product()
+        self.extras.append(popcorn)
+        self.total_price += popcorn.price
+        return self
+    def add_candy(self, candy_type="Mixed", price=6.0):
+        candy = self.factory.create_product("candy", type=candy_type)
+        candy.purchase_product()
+        self.extras.append(candy)
+        self.total_price += candy.price
+        return self
+    def add_nachos(self, topping="cheese", price=10.0):
+        nachos = self.factory.create_product("nachos", topping=topping)
+        nachos.purchase_product()
+        self.extras.append(nachos)
+        self.total_price += nachos.price
+        return self
+    def add_hotdog(self, size="regular", price=12.0):
+        hotdog = self.factory.create_product("hotdog", size=size)
+        hotdog.purchase_product()
+        self.extras.append(hotdog)
+        self.total_price += hotdog.price
+        return self
+    def add_soda(self, size="M", price=4.0):
+        soda = self.factory.create_product("soda", size=size)
+        soda.purchase_product()
+        self.extras.append(soda)
+        self.total_price += soda.price
+        return self
+    def add_juice(self, size="M", price=5.0):
+        juice = self.factory.create_product("juice", size=size)
+        juice.purchase_product()
+        self.extras.append(juice)
+        self.total_price += juice.price
+        return self
+
+    def add_water(self, size="M", price=4.0):
+        water = self.factory.create_product("water", size=size, price=price)
+        water.purchase_product()
+        self.extras.append(water)
+        self.total_price += water.price
+        return self
+    
+    def remove_extra(self, identifier):
+        if isinstance(identifier, int):
+            idx = identifier
+        else:
+            idx = next((i for i, extra in enumerate(self.extras) if extra.name == identifier), None)
+
+        if idx is None or not (0 <= idx < len(self.extras)):
+            print("Invalid index or name.")
+            return False
+        
+        extra = self.extras.pop(idx)
+
+        try:
+            if hasattr(extra, 'cancel_purchase') and callable(extra.cancel_purchase):
+                extra.cancel_purchase()
+        except Exception as e:
+            print(f"Error cancelling purchase for {extra.name}: {e}")
+        
+        self.total_price = max(0.0, self.total_price - getattr(extra, 'price', 0.0))
+        print(f"Removed extra: {extra.name} - R$ {getattr(extra, 'price', 0.0):.2f}")
+        return True
+    
+    def apply_coupon(self, coupon_code):
+        if not self.ticket or not coupon_code:
+            print("No ticket or coupon provided.")
+            return self
+
+        coupon = promotion_manager.get_coupon(coupon_code)
+        if not coupon:
+            print("Invalid coupon code.")
+            return self
+
+        subtotal = self.ticket.price + sum(extra.price for extra in self.extras)
+
+        cinema_name = None
+        movie_name = self.ticket.showtime.movie.name if self.ticket and self.ticket.showtime else None
+        user_type = "student" if "student" in self.ticket.name.lower() else "regular"
+
+        if not coupon.can_apply(subtotal, cinema_name, movie_name, user_type):
+            print(f"Coupon '{coupon.code}' cannot be applied to this purchase.")
+            return self
+        
+        try:
+            self.ticket.promotion(coupon)
+            for extra in self.extras:
+                if hasattr(extra, 'promotion') and callable(extra.promotion):
+                    extra.promotion(coupon)
+        except Exception as e:
+            print(f"Error applying coupon: {e}")
+            return self
+
+        self.total_price = self.ticket.price + sum(extra.price for extra in self.extras)
+        coupon.use()
+        discount = subtotal - self.total_price
+        print(f"Coupon '{coupon.code}' applied! Discount: R$ {discount:.2f}")
+        return self
+    def build(self):
+        if not self.ticket:
+            raise ValueError("A ticket must be added to the combo.")
+        combo = {
+            "ticket": self.ticket,
+            "extras": self.extras,
+            "total_price": self.total_price,
+            "user": self.user
+        }
+        return combo
+def create_ticket_with_factory(user, ticket_type, seat, showtime, price=25.0):
+    factory = get_factory_for_user(user, ticket_type)
+    ticket = factory.create_product("ticket", name=f"{ticket_type.title()} Ticket", price=price, seat=seat, showtime=showtime)
+    return ticket
 
 class USER:
     def __init__(self, name, login, password, email=None):  
@@ -212,7 +767,7 @@ class USER:
 class ADMIN(USER):
     def __init__(self, name, login, password, email=None):
         super().__init__(name, login, password, email)
-        self.user_type = "admin"
+        self.user_type = "admin" 
         self.permissions = ["manage_movies", "manage_cinemas", "manage_coupons", "view_reports"]
     
     def add_movie_to_cinema(self, cinema, movie):
@@ -278,6 +833,7 @@ class ADMIN(USER):
         total_bookings = sum(len(user.booking_history) for user in usuarios_registrados.values())
         print(f" System-Wide Total Bookings: {total_bookings}")
         print(f" System-Wide Active Coupons: {len(promotion_manager.list_active_coupons())}")
+        print(f" Total Registered Users: {len(usuarios_registrados)}")
         print("-" * 50)
 
         for cinema in cinemas.values():
@@ -289,79 +845,6 @@ class ADMIN(USER):
                 print(f" Average ticket price: R$ {movie.average_ticket_price:.2f}")
                 print("-" * 30)
         return True
-    
-class POPCORN(PRODUCT):
-    def __init__(self, name, price, size):
-        super().__init__(name, price)
-        self.size = size
-    
-    def purchase_product(self):
-        if self.size == "L":
-            self.price = 7.5
-            self.name = "Pipoca Grande"
-        elif self.size == "M":
-            self.price = 6.0
-            self.name = "Pipoca Média"
-        else:
-            self.price = 4.5
-            self.name = "Pipoca Pequena"
-        return self.price
-    
-    def cancel_purchase(self):
-        print(f"Popcorn of size {self.size} purchase cancelled.")    
-
-    def promotion(self, coupon=None):
-        if coupon and coupon.can_apply(self.price):
-            new_price, discount = coupon.apply_discount(self.price)
-            self.price = new_price
-            print(f"Coupon '{coupon.code}' applied to popcorn! Discount: R${discount:.2f}")
-        return self.price
-        
-class TICKET(PRODUCT):
-    def __init__(self, name, price, seat, showtime):
-        super().__init__(name, price)
-        self.seat = seat
-        self.showtime = showtime
-    
-    def purchase_product(self):
-        print(f"Ticket for seat {self.seat.row_and_number} purchased successfully.")
-    
-    def cancel_purchase(self):
-        print(f"Ticket for seat {self.seat.row_and_number} cancelled.")
-        self.seat.release()  
-       
-    def promotion(self, coupon=None):
-        if coupon:
-            
-            cinema_name = None 
-            movie_name = self.showtime.movie.name
-            user_type = "student" if "student" in self.name.lower() else "regular"
-            
-            if coupon.can_apply(self.price, cinema_name, movie_name, user_type):
-                new_price, discount = coupon.apply_discount(self.price)
-                self.price = new_price
-                print(f"Coupon '{coupon.code}' applied! Discount: R${discount:.2f}")
-                coupon.use()
-            else:
-                print(f"Coupon '{coupon.code}' cannot be applied to this purchase.")
-        
-        return self.price
-
-    def generate_qr_code(self):
-        data = f"""
-        Ticket for seat {self.seat.row_and_number}
-        Movie: {self.showtime.movie.name}
-        Time: {self.showtime.time}
-        Room: {self.showtime.screen_number}
-        """
-        qr = qrcode.QRCode(box_size=2)
-        qr.add_data(data)
-        print("\n📲 Mobile Ticket With QR Code:")
-        print("-"*40)
-        print(data.strip())
-        print("-"*40)
-        qr.print_ascii(invert=True)
-        print("-"*40)
 
 class SEAT:
     def __init__(self, row_and_number):
@@ -551,6 +1034,8 @@ def inicializar_dados():
     cinemas["Centerplex"] = centerplex
     
     usuarios_registrados["marcela"] = USER("Marcela", "marcela", "12345", "marcela@email.com")
+    usuarios_registrados["joao"] = USER("João", "joao", "senha123", "joao@cinema.com")
+    usuarios_registrados["pedro"] = USER("Pedro", "pedro", "senha456", "pedro@cinema.com")
     usuarios_registrados["admin"] = ADMIN("Admin", "admin", "admin123", "admin@cinema.com")
     usuarios_registrados["system"] = USER("System", "system", "system", "system@cinema.com")
 
@@ -565,10 +1050,12 @@ def menu_principal():
             print("[2] My Reservations")
             print("[3] Notifications")
             print("[4] Review a Movie")
-            print("[5] View Available Coupons")
-            print("[6] Cancel a Purchase")
+            print("[5] View Reviews")
+            print("[6] View Available Coupons")
+            print("[7] View Mobile Ticket with QR Code")
+            print("[8] Cancel a Purchase")
             if isinstance(usuario_logado, ADMIN):
-                print("[7] Admin Panel")
+                print("[9] Admin Panel")
             print("[0] Logout")
         else:
             print("[1] Login")
@@ -594,14 +1081,18 @@ def menu_principal():
             elif escolha == "4":
                 avaliar_filme()
             elif escolha == "5":
-                view_coupons()
+                ver_avaliacoes()
             elif escolha == "6":
+                view_coupons()
+            elif escolha == "7":
+                ver_bilhete_qrcode()
+            elif escolha == "8":
                 cancelar_compra()
-            elif escolha == "7" and isinstance(usuario_logado, ADMIN):
+            elif escolha == "9" and isinstance(usuario_logado, ADMIN):
                 admin_panel()
             elif escolha == "0":
                 usuario_logado = None
-                print("You have logged out of your account.")
+                print(f"You have logged out of your account bye")
             else:
                 print("Invalid option. Please try again.")
 
@@ -665,6 +1156,67 @@ def view_coupons():
             if coupon.user_type:
                 print(f" User type: {coupon.user_type}")
             print("-" * 50)
+
+def ver_avaliacoes():
+    print("\n--- Choose a Cinema to See Movie Reviews ---")
+    cinema_keys = list(cinemas.keys())
+    for i, cinema_nome in enumerate(cinema_keys, 1):
+        print(f"[{i}] {cinema_nome}")
+    print("[0] Back to main menu")
+
+    try:
+        escolha_cinema = input("Enter the theater number: ")
+        if escolha_cinema == '0':
+            return
+        
+        cinema_nome = cinema_keys[int(escolha_cinema) - 1]
+        cinema_obj = cinemas[cinema_nome]
+
+        print(f"\n--- Movies at {cinema_obj.name} ---")
+        for i, movie in enumerate(cinema_obj.movies, 1):
+            print(f"[{i}] {movie.name}")
+        print("[0] Back")
+
+        escolha_filme = input("Enter the number of the movie to see reviews for: ")
+        if escolha_filme == '0':
+            return
+            
+        movie_to_view = cinema_obj.movies[int(escolha_filme) - 1]
+
+        print(f"\n--- Reviews for '{movie_to_view.name}' ---")
+        if not movie_to_view.reviews:
+            print("No reviews for this movie yet.")
+        else:
+            avg_rating = movie_to_view.get_average_rating()
+            print(f"Average Rating: {avg_rating:.1f}/5.0")
+            print("-" * 30)
+            for i, review in enumerate(movie_to_view.reviews, 1):
+                print(f"Review #{i} | Rating: {review['rating']}/5")
+                print(f'"{review["comment"]}"')
+                print("-" * 20)
+
+    except (ValueError, IndexError):
+        print("Invalid option. Please try again.")
+
+def ver_bilhete_qrcode():
+    if not usuario_logado.booking_history:
+        print("You have no bookings to view.")
+        return
+
+    usuario_logado.view_booking_history()
+    try:
+        escolha = int(input("Enter the number of the booking to view the QR Code for (or '0' to go back): "))
+        if escolha == 0:
+            return
+        
+        index = escolha - 1
+        if 0 <= index < len(usuario_logado.booking_history):
+            ticket = usuario_logado.booking_history[index]
+            ticket.generate_qr_code()
+        else:
+            print("Invalid booking number.")
+    except ValueError:
+        print("Invalid input. Please enter a number.")
 
 def admin_panel():
     while True:
@@ -849,19 +1401,30 @@ def ver_cinemas():
             print("Invalid option.")
             
 def ver_filmes(cinema_obj):
+    print(f"\n--- Movies at {cinema_obj.name} ---")
     cinema_obj.list_movies()
-        
-    escolha_filme = input("Enter the name of the movie you want to buy tickets for (or 'exit' to go back): ")
-    if escolha_filme.lower() == 'exit':
-        return
-    
-    filme_selecionado = next((m for m in cinema_obj.movies if m.name.lower() == escolha_filme.lower()), None)
-    if not filme_selecionado:
-        print("Movie not found. Please try again.")
-        return
-        
-    comprar_ingresso(filme_selecionado)
+    print("-" * 30)
 
+    for i, movie in enumerate(cinema_obj.movies, 1):
+        print(f"[{i}] {movie.name}")
+    print("[0] Back to previous menu")
+        
+    while True:
+        try:
+            escolha_filme = input("Enter the number of the movie you want to buy tickets for: ")
+            if escolha_filme == '0':
+                return
+
+            index_filme = int(escolha_filme) - 1
+            if 0 <= index_filme < len(cinema_obj.movies):
+                filme_selecionado = cinema_obj.movies[index_filme]
+                comprar_ingresso(filme_selecionado)
+                break 
+            else:
+                print("Invalid movie number. Please try again.")
+        except (ValueError, IndexError):
+            print("Invalid option. Please enter a number.")
+        
 def payment(valor):
     print(f"\n--- Payment Process of R${valor:.2f} ---")
     while True:
@@ -891,6 +1454,148 @@ def payment(valor):
             return False
         else:
             print("Invalid option. Please try again.")
+def handle_combo_addition(builder):
+    choice_combo = input("\nWould you like to add a combo? \n[1] Yes\n[2] No\n ").strip()
+    if choice_combo == "1":
+        while True:
+            print("\n--- Add Extras to Your Combo ---")
+            print("[1] Add Popcorn")
+            print("[2] Add Soda")
+            print("[3] Add Juice")
+            print("[4] Add Water")
+            print("[5] Add Candy")
+            print("[6] Add Nachos")
+            print("[7] Add Hot Dog")
+            print("[8] Apply Coupon")
+            print("[9] Finish and Proceed to Payment")
+            print("[10] Remove an Extra")
+            print("[0] Cancel")
+            extra_choice = input("Select an option: ").strip()
+
+            if extra_choice == "1":
+               while True:
+                    size = input("Popcorn size (S, M, L): ").upper()
+                    if size in ["S", "M", "L"]:
+                        builder.add_popcorn(size=size)
+                        break
+                    else:
+                        print("Invalid size. Please choose S, M, or L.")
+            elif extra_choice == "2":
+                while True:
+                    size = input("Soda size (S, M, L): ").upper()
+                    if size in ["S", "M", "L"]:
+                        builder.add_soda(size=size)
+                        break
+                    else:
+                        print("Invalid size. Please choose S, M, or L.")
+            elif extra_choice == "3":
+                while True:
+                    size = input("Juice size (S, M, L): ").upper()
+                    if size in ["S", "M", "L"]:
+                        builder.add_juice(size=size)
+                        break
+                    else:
+                        print("Invalid size. Please choose S, M, or L.")
+            elif extra_choice == "4":
+                while True:
+                    size = input("Water size (S, M, L): ").upper()
+                    if size in ["S", "M", "L"]:
+                        builder.add_water(size=size)
+                        break
+                    else:
+                        print("Invalid size. Please choose S, M, or L.")
+            elif extra_choice == "5":
+                while True:
+                    candy_type = input("Candy type (e.g., Mixed, Chocolate): ").strip()
+                    if candy_type:
+                        builder.add_candy(candy_type=candy_type)
+                        break
+                    else:
+                        print("Invalid candy type. Please enter a valid type.")
+            elif extra_choice == "6":
+                while True:
+                    topping = input("Nachos topping (e.g., cheese, guacamole, jalapeño): ").strip()
+                    if topping:
+                        builder.add_nachos(topping=topping)
+                        break
+                    else:
+                        print("Invalid topping. Please enter a valid topping.")
+            elif extra_choice == "7":
+                while True:
+                    size = input("Hot Dog size (small, regular, jumbo): ").strip()
+                    if size in ["small", "regular", "jumbo"]:
+                        builder.add_hotdog(size=size)
+                        break
+                    else:
+                        print("Invalid size. Please choose small, regular, or jumbo.")
+            elif extra_choice == "8":
+                while True:
+                    coupon_code = input("Enter coupon code: ").strip()
+                    if coupon_code:
+                        builder.apply_coupon(coupon_code=coupon_code)
+                        break
+                    else:
+                        print("Invalid coupon code. Please enter a valid code.")
+            elif extra_choice == "9":
+                break
+            elif extra_choice == "10":
+                if not builder.extras:
+                    print("No extras to remove.")
+                    continue
+                print("\nCurrent Extras in Combo:")
+                for i, extra in enumerate(builder.extras, 1):
+                    print(f"[{i}] {extra.name} - R$ {extra.price:.2f}")
+                try:
+                    remove_choice = int(input("Enter the number of the extra to remove: ")) - 1
+                    if 0 <= remove_choice < len(builder.extras):
+                        extra_to_remove = builder.extras[remove_choice]
+                        builder.remove_extra(extra_to_remove.name)
+                    else:
+                        print("Invalid number.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+            elif extra_choice == "0":
+                print("Combo addition canceled.")
+                break
+            else:
+                print("Invalid option. Please try again.")
+    
+    # Oferece cupom mesmo se o usuário não quiser um combo
+    elif choice_combo == "2":
+        apply_coupon = input("Do you have a coupon? \n[1] Yes\n[2] No\n ").strip()
+        if apply_coupon == "1":
+            coupon_code = input("Enter coupon code: ").strip()
+            builder.apply_coupon(coupon_code)
+
+def finalize_purchase(combo, movie, showtime, seat):
+    seat.reservation_expiry = None  # Confirma a reserva permanentemente
+    combo['ticket'].extras = combo['extras']
+    combo['ticket'].purchase_product()
+    usuario_logado.add_booking(combo['ticket'])
+    movie.total_tickets_sold += 1
+    movie.total_revenue += combo['total_price']
+    combo['ticket'].generate_qr_code()
+
+    # Notificação de Pagamento
+    notification_service.send_notification(
+        usuario_logado, PAYMENT_SUCCESS,
+        f"Payment confirmed: R$ {combo['total_price']:.2f}",
+        {
+            "movie": movie.name, "time": showtime.time, "room": showtime.screen_number,
+            "seat": seat.row_and_number, "amount": f"{combo['total_price']:.2f}",
+            "extras_count": len(combo['extras']),
+        }
+    )
+    # Notificação de Reserva
+    notification_service.send_notification(
+        usuario_logado, BOOKING_CONFIRMED,
+        f"Booking confirmed for '{movie.name}'",
+        {
+            "movie": movie.name, "time": showtime.time,
+            "room": showtime.screen_number, "seat": seat.row_and_number,
+        }
+    )
+    print("\nPurchase completed successfully!")
 
 def comprar_ingresso(movie):
     print(f"\n--- Buy Ticket for '{movie.name}' ---")
@@ -924,81 +1629,51 @@ def comprar_ingresso(movie):
             break
         else:
             print("Could not reserve seat. Please try another one.")
-    
-    tipo_ingresso = input("Enter the ticket type (Standard, Student): ").capitalize()
+
+    while True:
+        tipo_ingresso_input = input("Enter the ticket type (Standard, Student, VIP): ").strip().lower()
+        if tipo_ingresso_input == "standard":
+            tipo_ingresso = "Standard"
+            break
+        elif tipo_ingresso_input == "student":
+            tipo_ingresso = "Student"
+            break
+        elif tipo_ingresso_input == "vip":
+            tipo_ingresso = "VIP"
+            break
+        else:
+            print("Invalid ticket type. Please choose from Standard, Student, or VIP.")
     preco = 25.0
     
-    ticket = TICKET(tipo_ingresso, preco, assento_selecionado, showtime_selecionado)
-    
-    coupon_code = input("Do you have a coupon code? (Enter code or leave blank): ")
-    if coupon_code:
-        coupon = promotion_manager.get_coupon(coupon_code)
-        if coupon:
-            ticket.promotion(coupon)
-        else:
-            print("Invalid coupon code.")
+    builder = ComboBuilder(usuario_logado)
+    builder.add_ticket(tipo_ingresso, assento_selecionado, showtime_selecionado, preco)
+    handle_combo_addition(builder)
 
-    print(f"\nPurchase Summary:")
-    print(f" Movie: {movie.name}")
-    print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
-    print(f" Seat: {assento_selecionado.row_and_number}")
-    print(f" Ticket Price: R$ {ticket.price:.2f}")
+    try:
+        combo = builder.build()
+        print(f"\nPurchase Summary:")
+        print(f" Movie: {movie.name}")
+        print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
+        print(f" Seat: {assento_selecionado.row_and_number}")
+        print(f" Ticket: {combo['ticket'].name} - R$ {combo['ticket'].price:.2f}")
+        if combo['extras']:
+            for extra in combo['extras']:
+                print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
+        print(f" Total: R$ {combo['total_price']:.2f}")
+    except Exception as e:
+        print(f"Error building combo: {e}")
+        return
 
-    total_price = ticket.price
-    popcorn_item = None
-
-    escolha_combo = input("\nWould you like to add a popcorn combo? \n[1] Yes\n[2] No\n ")
-    if escolha_combo == "1":
-        while True:
-            combo_size = input("Popcorn size (S, M, L): ").upper()
-            if combo_size in ["S", "M", "L"]:
-                break
-            else:
-                print("Invalid size. Please try again.")
-        popcorn_item = POPCORN("Popcorn", 0.0, combo_size)
-        popcorn_item.purchase_product()
-        print(f"Combo of {popcorn_item.name} ({popcorn_item.size}) added. Price: R$ {popcorn_item.price:.2f}")
-        total_price += popcorn_item.price
-        print(f"New Total price: R$ {total_price:.2f}")
-
-    pagar = input(f"Total price: R$ {total_price:.2f}. Do you wish to proceed with the payment? \n[1] Yes\n[2] No\n ")
+    pagar = input(f"Proceed with payment of R$ {combo['total_price']:.2f}? \n[1] Yes\n[2] No\n ").strip()
     if pagar == "1":
         if not assento_selecionado.check_expiry():
-            if payment(total_price):
-                assento_selecionado.reservation_expiry = None 
-                ticket.purchase_product()
-                usuario_logado.add_booking(ticket)
-                movie.total_tickets_sold += 1
-                movie.total_revenue += total_price
-                ticket.generate_qr_code()
-                notification_service.send_notification(
-                usuario_logado,
-                PAYMENT_SUCCESS,
-                f"Payment confirmed: R$ {total_price:.2f}",
-                {
-                    "movie": movie.name,
-                    "time": showtime_selecionado.time,
-                    "room": showtime_selecionado.screen_number,
-                    "seat": assento_selecionado.row_and_number,
-                    "amount": f"{total_price:.2f}",
-                },
-                )
-                notification_service.send_notification(
-                    usuario_logado,
-                    BOOKING_CONFIRMED,
-                    f"Booking confirmed for '{movie.name}'",
-                    {
-                        "movie": movie.name,
-                        "time": showtime_selecionado.time,
-                        "room": showtime_selecionado.screen_number,
-                        "seat": assento_selecionado.row_and_number,
-                    },
-                )
+            if payment(combo['total_price']):
+                finalize_purchase(combo, movie, showtime_selecionado, assento_selecionado)
             else:
                 print("Payment failed. Releasing seat.")
                 assento_selecionado.release(usuario_logado)
         else:
-            print("Your temporary reservation has expired. Please start over.")   
+            print("Your temporary reservation has expired. Please start over.")
     else:
         print("Purchase canceled.")
         assento_selecionado.release(usuario_logado)
@@ -1052,9 +1727,24 @@ def cancelar_compra():
         index = int(escolha) - 1
         if 0 <= index < len(usuario_logado.booking_history):
             ticket_to_cancel = usuario_logado.booking_history[index]
+            movie = ticket_to_cancel.showtime.movie
+            
+            total_canceled_value = ticket_to_cancel.price
+            print(f"Canceling ticket: {ticket_to_cancel.name} - R$ {ticket_to_cancel.price:.2f}")
+
+            for extra in ticket_to_cancel.extras:
+                total_canceled_value += extra.price
+                if hasattr(extra, 'cancel_purchase'):
+                    extra.cancel_purchase()
+
+            movie.total_revenue -= total_canceled_value
+            movie.total_tickets_sold -= 1
+    
             ticket_to_cancel.cancel_purchase()
+            
             usuario_logado.remove_booking(ticket_to_cancel)
-            print("Booking cancelled successfully!")
+            
+            print(f"Booking and associated extras cancelled successfully! R$ {total_canceled_value:.2f} will be refunded.")
         else:
             print("Invalid number.")
     except (ValueError, IndexError):
