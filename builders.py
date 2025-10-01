@@ -1,90 +1,104 @@
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from factories import get_factory_for_user
 from services import promotion_manager
 
+# --- Produto Final ---
+@dataclass
+class Combo:
+    ticket: object
+    extras: list
+    total_price: float
+    user: object
 
-#----- Builder ------
-class ComboBuilder:
+# --- Interface Builder ---
+class Builder(ABC):
+    @abstractmethod
+    def reset(self):
+        pass
+    
+    @abstractmethod
+    def build(self):
+        pass
+
+# --- Builder Concreto ---
+class ComboBuilder(Builder):
     def __init__(self, user):
         self.user = user
-        self.factory = get_factory_for_user(user)
-        self.ticket = None
-        self.extras = []
-        self.total_price = 0.0
+        self.reset()
+    
+    def reset(self):
+        self.factory = get_factory_for_user(self.user)
+        self._ticket = None
+        self._extras = []
+        self._total_price = 0.0
+        return self
 
     def add_ticket(self, ticket_type, seat, showtime, price=25.0):
-        self.ticket = create_ticket_with_factory(self.user, ticket_type, seat, showtime, price=price)
+        self._ticket = create_ticket_with_factory(self.user, ticket_type, seat, showtime, price=price)
         self.factory = get_factory_for_user(self.user, ticket_type)
-        self.total_price += self.ticket.price
+        self._total_price += self._ticket.price
         return self
     
-    def add_popcorn(self, size="M", price=5.0):
+    def add_popcorn(self, size="M"):
         popcorn = self.factory.create_product("popcorn", size=size)
-        popcorn.purchase_product()
-        self.extras.append(popcorn)
-        self.total_price += popcorn.price
+        self._extras.append(popcorn)
+        self._total_price += popcorn.price
         return self
-    def add_candy(self, candy_type="Mixed", price=6.0):
+    
+    def add_candy(self, candy_type="Mixed"):
         candy = self.factory.create_product("candy", type=candy_type)
-        candy.purchase_product()
-        self.extras.append(candy)
-        self.total_price += candy.price
+        self._extras.append(candy)
+        self._total_price += candy.price
         return self
-    def add_nachos(self, topping="cheese", price=10.0):
+    
+    def add_nachos(self, topping="cheese"):
         nachos = self.factory.create_product("nachos", topping=topping)
-        nachos.purchase_product()
-        self.extras.append(nachos)
-        self.total_price += nachos.price
+        self._extras.append(nachos)
+        self._total_price += nachos.price
         return self
-    def add_hotdog(self, size="regular", price=12.0):
+    
+    def add_hotdog(self, size="regular"):
         hotdog = self.factory.create_product("hotdog", size=size)
-        hotdog.purchase_product()
-        self.extras.append(hotdog)
-        self.total_price += hotdog.price
+        self._extras.append(hotdog)
+        self._total_price += hotdog.price
         return self
-    def add_soda(self, size="M", price=4.0):
+    
+    def add_soda(self, size="M"):
         soda = self.factory.create_product("soda", size=size)
-        soda.purchase_product()
-        self.extras.append(soda)
-        self.total_price += soda.price
+        self._extras.append(soda)
+        self._total_price += soda.price
         return self
-    def add_juice(self, size="M", price=5.0):
+    
+    def add_juice(self, size="M"):
         juice = self.factory.create_product("juice", size=size)
-        juice.purchase_product()
-        self.extras.append(juice)
-        self.total_price += juice.price
+        self._extras.append(juice)
+        self._total_price += juice.price
         return self
 
     def add_water(self, size="M", price=4.0):
         water = self.factory.create_product("water", size=size, price=price)
-        water.purchase_product()
-        self.extras.append(water)
-        self.total_price += water.price
+        self._extras.append(water)
+        self._total_price += water.price
         return self
     
     def remove_extra(self, identifier):
         if isinstance(identifier, int):
             idx = identifier
         else:
-            idx = next((i for i, extra in enumerate(self.extras) if extra.name == identifier), None)
+            idx = next((i for i, extra in enumerate(self._extras) if extra.name == identifier), None)
 
-        if idx is None or not (0 <= idx < len(self.extras)):
+        if idx is None or not (0 <= idx < len(self._extras)):
             print("Invalid index or name.")
             return False
         
-        extra = self.extras.pop(idx)
-
-        try:
-            if hasattr(extra, 'cancel_purchase') and callable(extra.cancel_purchase):
-                extra.cancel_purchase()
-        except Exception as e:
-            print(f"Error cancelling purchase for {extra.name}: {e}")
-        
-        self.total_price = max(0.0, self.total_price - getattr(extra, 'price', 0.0))
+        extra = self._extras.pop(idx)
+        self._total_price = max(0.0, self._total_price - getattr(extra, 'price', 0.0))
         print(f"Removed extra: {extra.name} - R$ {getattr(extra, 'price', 0.0):.2f}")
         return True
     
     def apply_coupon(self, coupon_code):
-        if not self.ticket or not coupon_code:
+        if not self._ticket or not coupon_code:
             print("No ticket or coupon provided.")
             return self
 
@@ -93,40 +107,88 @@ class ComboBuilder:
             print("Invalid coupon code.")
             return self
 
-        subtotal = self.ticket.price + sum(extra.price for extra in self.extras)
+        subtotal = self._ticket.price + sum(extra.price for extra in self._extras)
+        movie_name = self._ticket.showtime.movie.name if self._ticket and self._ticket.showtime else None
+        user_type = "student" if "student" in self._ticket.name.lower() else "regular"
 
-        cinema_name = None
-        movie_name = self.ticket.showtime.movie.name if self.ticket and self.ticket.showtime else None
-        user_type = "student" if "student" in self.ticket.name.lower() else "regular"
-
-        if not coupon.can_apply(subtotal, cinema_name, movie_name, user_type):
+        if not coupon.can_apply(subtotal, None, movie_name, user_type):
             print(f"Coupon '{coupon.code}' cannot be applied to this purchase.")
             return self
         
         try:
-            self.ticket.promotion(coupon)
-            for extra in self.extras:
+            self._ticket.promotion(coupon)
+            for extra in self._extras:
                 if hasattr(extra, 'promotion') and callable(extra.promotion):
                     extra.promotion(coupon)
         except Exception as e:
             print(f"Error applying coupon: {e}")
             return self
 
-        self.total_price = self.ticket.price + sum(extra.price for extra in self.extras)
+        self._total_price = self._ticket.price + sum(extra.price for extra in self._extras)
         coupon.use()
-        discount = subtotal - self.total_price
+        discount = subtotal - self._total_price
         print(f"Coupon '{coupon.code}' applied! Discount: R$ {discount:.2f}")
         return self
-    def build(self):
-        if not self.ticket:
+    
+    def build(self) -> Combo:
+        if not self._ticket:
             raise ValueError("A ticket must be added to the combo.")
-        combo = {
-            "ticket": self.ticket,
-            "extras": self.extras,
-            "total_price": self.total_price,
-            "user": self.user
-        }
+        
+        combo = Combo(
+            ticket=self._ticket,
+            extras=list(self._extras),
+            total_price=self._total_price,
+            user=self.user
+        )
+        self.reset() 
         return combo
+    
+class ComboDirector:
+
+    def __init__(self):
+        self._builder = None
+    @property
+    def builder(self):
+        return self._builder
+    
+    @builder.setter
+    def builder(self, builder: ComboBuilder):
+        self._builder = builder
+    
+    def build_basic_combo(self, ticket_type, seat, showtime):
+        self._builder.reset()
+        self._builder.add_ticket(ticket_type, seat, showtime)
+        self._builder.add_popcorn(size="M")
+        self._builder.add_soda(size="M")
+        return self._builder.build()
+    
+    def build_premium_combo(self, ticket_type, seat, showtime):
+        self._builder.reset()
+        self._builder.add_ticket(ticket_type, seat, showtime)
+        self._builder.add_popcorn(size="L")
+        self._builder.add_soda(size="L")
+        self._builder.add_candy(candy_type="Chocolate")
+        return self._builder.build()
+    
+    def build_family_combo(self, ticket_type, seat, showtime):
+        self._builder.reset()
+        self._builder.add_ticket(ticket_type, seat, showtime)
+        self._builder.add_popcorn(size="L")
+        self._builder.add_popcorn(size="L")
+        self._builder.add_soda(size="M")
+        self._builder.add_soda(size="M")
+        self._builder.add_soda(size="M")
+        self._builder.add_soda(size="M")
+        return self._builder.build()
+    
+    def build_student_combo(self, ticket_type, seat, showtime):
+        self._builder.reset()
+        self._builder.add_ticket(ticket_type, seat, showtime)
+        self._builder.add_popcorn(size="S")
+        self._builder.add_water(size="M")
+        return self._builder.build()
+
+
 def create_ticket_with_factory(user, ticket_type, seat, showtime, price=25.0):
     factory = get_factory_for_user(user, ticket_type)
     ticket = factory.create_product("ticket", name=f"{ticket_type.title()} Ticket", price=price, seat=seat, showtime=showtime)

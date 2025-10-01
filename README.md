@@ -19,13 +19,12 @@ Functions that have been implemented:
 ### Refatoramento(Padrões Criacionais)
 # Padrões de Projeto Criacionais Implementados (Creational Design Patterns)
 
-Em resumo, o uso do Abstract Factory tornou o sistema de criação de produtos **altamente organizado, flexível e fácil de estender**, eliminando a lógica condicional (`if/else`) espalhada e garantindo que as regras de negócio para diferentes tipos de clientes sejam aplicadas de forma consistente.
 ### 1. Singleton
 *   **Onde foi usado?** Nas classes `NotificationService` e `PromotionManager` dentro de `system.py`, utilizando uma Metaclasse `MetaSingleton` para garantir a unicidade.
 *   **Motivo e Vantagem:** Serviços como o de notificação ou o gerenciador de promoções devem ser únicos em toda a aplicação. Não faz sentido ter múltiplos gerenciadores de cupons ou múltiplos centros de notificação, pois eles controlam um estado centralizado (a lista de notificações enviadas e a lista de cupons disponíveis). O Singleton garante que, não importa onde o serviço seja importado ou instanciado, ele sempre se referirá ao **mesmo objeto**, mantendo a consistência dos dados em todo o sistema.
 
 ### 2. Builder
-*   **Onde foi usado?** Na classe `ComboBuilder` em `system.py` para criar a compra final do cliente, que pode incluir um ingresso e vários itens extras (pipoca, refrigerante, etc.).
+*   **Onde foi usado?** Na classe `ComboBuilder` em `system.py` para criar a compra final do cliente, que pode incluir um ingresso e vários itens extras (pipoca, refrigerante, etc.) e há implementação de diretor responsável pela montagem de combos pré-montados.
 *   **Motivo e Vantagem:** A criação de um "combo" de compra é complexa. O preço final depende do tipo de ingresso, dos itens adicionais, de seus tamanhos e de cupons de desconto. O Builder permite construir esse objeto complexo passo a passo (`.add_ticket()`, `.add_popcorn()`, `.apply_coupon()`) sem sobrecarregar o construtor com dezenas de parâmetros. Isso torna o código na interface do usuário (`comprar_ingresso`) muito mais limpo e legível, além de facilitar a adição de novos produtos ao combo no futuro.
 
 ### 3. Factory Method

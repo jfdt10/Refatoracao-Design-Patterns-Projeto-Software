@@ -512,8 +512,62 @@ def payment(valor):
             print("Invalid option. Please try again.")
 
 def handle_combo_addition(builder):
-    choice_combo = input("\nWould you like to add a combo? \n[1] Yes\n[2] No\n ").strip()
-    if choice_combo == "1":
+    print("\n--- Combo Options ---")
+    print("[1] Choose a Pre-built Combo (Quick)")
+    print("[2] Customize Your Own Combo")
+    print("[3] No combo, just the ticket")
+    
+    combo_option = input("Select an option: ").strip()
+    
+    if combo_option == "1":
+        from builders import ComboDirector
+        director = ComboDirector()
+        director.builder = builder
+        
+        print("\n--- Pre-built Combos ---")
+        print("[1] Basic Combo - Popcorn M + Soda M")
+        print("[2] Premium Combo - Popcorn L + Soda L + Candy")
+        print("[3] Family Combo - 2 Popcorns L + 4 Sodas M")
+        print("[4] Student Combo - Popcorn S + Water")
+        print("[0] Back")
+        
+        combo_choice = input("Select combo: ").strip()
+        
+        if combo_choice == "1":
+            builder.add_popcorn(size="M")
+            builder.add_soda(size="M")
+            print("Basic Combo added!")
+        elif combo_choice == "2":
+            builder.add_popcorn(size="L")
+            builder.add_soda(size="L")
+            builder.add_candy(candy_type="Chocolate")
+            print("Premium Combo added!")
+        elif combo_choice == "3":
+            builder.add_popcorn(size="L")
+            builder.add_popcorn(size="L")
+            builder.add_soda(size="M")
+            builder.add_soda(size="M")
+            builder.add_soda(size="M")
+            builder.add_soda(size="M")
+            print("Family Combo added!")
+        elif combo_choice == "4":
+            builder.add_popcorn(size="S")
+            builder.add_water(size="M")
+            print("Student Combo added!")
+        elif combo_choice == "0":
+            return False
+        else:
+            print("Invalid option.")
+            return False
+        
+        apply_coupon = input("\nDo you have a coupon? \n[1] Yes\n[2] No\n ").strip()
+        if apply_coupon == "1":
+            coupon_code = input("Enter coupon code: ").strip()
+            builder.apply_coupon(coupon_code)
+        
+        return True
+    
+    elif combo_option == "2":
         while True:
             print("\n--- Add Extras to Your Combo ---")
             print("[1] Add Popcorn")
@@ -530,7 +584,7 @@ def handle_combo_addition(builder):
             extra_choice = input("Select an option: ").strip()
 
             if extra_choice == "1":
-               while True:
+                while True:
                     size = input("Popcorn size (S, M, L): ").upper()
                     if size in ["S", "M", "L"]:
                         builder.add_popcorn(size=size)
@@ -596,15 +650,15 @@ def handle_combo_addition(builder):
             elif extra_choice == "9":
                 break
             elif extra_choice == "10":
-                if not builder.extras:
+                if not builder._extras:
                     print("No extras to remove.")
                     continue
                 print("\nCurrent Extras in Combo:")
-                for i, extra in enumerate(builder.extras, 1):
+                for i, extra in enumerate(builder._extras, 1):
                     print(f"[{i}] {extra.name} - R$ {extra.price:.2f}")
                 try:
                     remove_choice = int(input("Enter the number of the extra to remove: ")) - 1
-                    if 0 <= remove_choice < len(builder.extras):
+                    if 0 <= remove_choice < len(builder._extras):
                         builder.remove_extra(remove_choice)
                     else:
                         print("Invalid number.")
@@ -612,29 +666,37 @@ def handle_combo_addition(builder):
                     print("Invalid input. Please enter a number.")
             elif extra_choice == "0":
                 print("Combo addition canceled.")
-                return False 
+                return False
             else:
                 print("Invalid option. Please try again.")
+        return True
     
-    elif choice_combo == "2":
-        apply_coupon = input("Do you have a coupon? \n[1] Yes\n[2] No\n ").strip()
+    elif combo_option == "3":
+        apply_coupon = input("\nDo you have a coupon? \n[1] Yes\n[2] No\n ").strip()
         if apply_coupon == "1":
             coupon_code = input("Enter coupon code: ").strip()
             builder.apply_coupon(coupon_code)
-    return True 
+        return True
+    
+    else:
+        print("Invalid option.")
+        return False
 
 def finalize_purchase(combo, movie, showtime, seat):
     seat.reservation_expiry = None
-    combo['ticket'].extras = combo['extras']
-    combo['ticket'].purchase_product()
-    state.usuario_logado.add_booking(combo['ticket'])
+    combo.ticket.extras = combo.extras
+    combo.ticket.purchase_product()
+    for extra in combo.extras:
+        if hasattr(extra, 'purchase_product'):
+            extra.purchase_product()
+    state.usuario_logado.add_booking(combo.ticket)
     movie.total_tickets_sold += 1
-    movie.total_revenue += combo['total_price']
-    combo['ticket'].generate_qr_code()
+    movie.total_revenue += combo.total_price
+    combo.ticket.generate_qr_code()
 
     notification_service.send_notification(
         state.usuario_logado, PAYMENT_SUCCESS,
-        f"Payment confirmed: R$ {combo['total_price']:.2f}",
+        f"Payment confirmed: R$ {combo.total_price:.2f}",
         {"movie": movie.name, "time": showtime.time, "seat": seat.row_and_number}
     )
     notification_service.send_notification(
@@ -698,20 +760,20 @@ def comprar_ingresso(movie):
         print(f" Movie: {movie.name}")
         print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
         print(f" Seat: {assento_selecionado.row_and_number}")
-        print(f" Ticket: {combo['ticket'].name} - R$ {combo['ticket'].price:.2f}")
-        if combo['extras']:
-            for extra in combo['extras']:
+        print(f" Ticket: {combo.ticket.name} - R$ {combo.ticket.price:.2f}")
+        if combo.extras:
+            for extra in combo.extras:
                 print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
-        print(f" Total: R$ {combo['total_price']:.2f}")
+        print(f" Total: R$ {combo.total_price:.2f}")
     except Exception as e:
         print(f"Error building combo: {e}")
         assento_selecionado.release(state.usuario_logado)
         return
 
-    pagar = input(f"Proceed with payment of R$ {combo['total_price']:.2f}? \n[1] Yes\n[2] No\n ").strip()
+    pagar = input(f"Proceed with payment of R$ {combo.total_price:.2f}? \n[1] Yes\n[2] No\n ").strip()
     if pagar == "1":
         if not assento_selecionado.check_expiry():
-            if payment(combo['total_price']):
+            if payment(combo.total_price):
                 finalize_purchase(combo, movie, showtime_selecionado, assento_selecionado)
             else:
                 print("Payment failed. Releasing seat.")
