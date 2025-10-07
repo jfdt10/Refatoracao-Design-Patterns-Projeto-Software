@@ -1,10 +1,15 @@
 import uuid
 from datetime import datetime, timedelta
 from utils import MetaSingleton, PERCENTAGE, FIXED_AMOUNT
+from events import event_bus, NotificationObserver, analytics_observer
 
 class NotificationService(metaclass=MetaSingleton):
     def __init__(self):
         self.notifications = []
+        notification_observer = NotificationObserver(self)
+        event_bus.attach(notification_observer)
+        event_bus.attach(analytics_observer)
+        print("Observers registrados com sucesso!")
     
     def send_notification(self, user, notification_type, message, data=None):
         notification = {

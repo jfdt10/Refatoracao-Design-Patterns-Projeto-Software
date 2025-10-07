@@ -8,6 +8,7 @@ from utils import (
     PAYMENT_SUCCESS, BOOKING_CONFIRMED
 )
 from builders import ComboBuilder
+from events import event_bus, analytics_observer
 
 
 def inicializar_dados():
@@ -228,6 +229,7 @@ def admin_panel():
         print("[3] Create New Coupon")
         print("[4] View System Reports")
         print("[5] Send Custom Notification")
+        print("[6] View Analytics Summary")
         print("[0] Back to Main Menu")
         
         escolha = input("Select an option: ")
@@ -242,10 +244,20 @@ def admin_panel():
             view_reports_admin() 
         elif escolha == "5":
             send_custom_notification_admin()
+        elif escolha == "6":
+            view_analytics_summary()
         elif escolha == "0":
             break
         else:
             print("Invalid option.")
+
+def view_analytics_summary()
+    if "view_reports" not in state.usuario_logado.permissions:
+        print("Access denied.")
+        return
+    
+    print(analytics_observer.get_report())
+    input("\n Press ENTER to go back...")
 
 def add_movie_admin():
     if "manage_movies" not in state.usuario_logado.permissions:
@@ -271,11 +283,13 @@ def add_movie_admin():
         cinema.add_movie(new_movie)
         print(f"Movie '{new_movie.name}' added to {cinema.name} successfully!")
 
-        for user in state.usuarios_registrados.values():
-            if user.user_type != "admin":
-                message = f"New movie available: '{new_movie.name}' at {cinema.name}!"
-                data = {"movie_name": new_movie.name, "cinema_name": cinema.name, "genre": new_movie.genre}
-                notification_service.send_notification(user, NEW_MOVIE, message, data)
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
+        event_bus.publish("new_movie", {
+            "movie_name": new_movie.name,
+            "cinema_name": cinema.name,
+            "genre": new_movie.genre,
+            "targets": targets
+        })
                 
     except (ValueError, IndexError):
         print("Invalid option.")
@@ -314,11 +328,12 @@ def add_showtime_admin():
         selected_movie.add_showtime(showtime_time, screen_number, seats)
         print(f"Showtime {showtime_time} added to '{selected_movie.name}' successfully!")
 
-        for user in state.usuarios_registrados.values():
-            if user.user_type != "admin":
-                message = f"New showtime available: '{selected_movie.name}' at {showtime_time}!"
-                data = {"movie_name": selected_movie.name, "time": showtime_time}
-                notification_service.send_notification(user, NEW_SHOWTIME, message, data)
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
+        event_bus.publish("new_showtime", {
+            "movie_name": selected_movie.name,
+            "time": showtime_time,
+            "targets": targets
+        })
 
     except (ValueError, IndexError):
         print("Invalid option.")
@@ -356,11 +371,12 @@ def create_coupon_admin():
         promotion_manager.add_coupon(new_coupon)
         print(f"Coupon '{code}' created successfully!")
 
-        for user in state.usuarios_registrados.values():
-            if user.user_type != "admin":
-                message = f"New discount coupon available: {new_coupon.code} - {new_coupon.description}"
-                data = {"coupon_code": new_coupon.code, "description": new_coupon.description}
-                notification_service.send_notification(user, DISCOUNT_COUPON, message, data)
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
+        event_bus.publish("discount_coupon", {
+            "coupon_code": new_coupon.code,
+            "description": new_coupon.description,
+            "targets": targets
+        })
 
     except ValueError:
         print("Invalid input. Please check the format of your entries.")
@@ -399,9 +415,11 @@ def send_custom_notification_admin():
         print("Message cannot be empty.")
         return
 
-    for user in state.usuarios_registrados.values():
-        if user.user_type != "admin":
-            notification_service.send_notification(user, "custom_message", message)
+    targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
+    event_bus.publish("custom_notification", {
+        "message": message,
+        "targets": targets
+    })
     print("Custom notifications sent to all users.")
 
 def login():
@@ -683,9 +701,16 @@ def handle_combo_addition(builder):
         return False
 
 def finalize_purchase(combo, movie, showtime, seat):
-    seat.reservation_expiry = None
+    
+    print(f"\nConfirming seat {seat.row_and_number} (current: {seat.get_status()})...")
+    if seat.confirm():
+        print(f"Seat {seat.row_and_number} is now {seat.get_status()}.")
+    else:
+        print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
+
     combo.ticket.extras = combo.extras
     combo.ticket.purchase_product()
+
     for extra in combo.extras:
         if hasattr(extra, 'purchase_product'):
             extra.purchase_product()
@@ -694,16 +719,21 @@ def finalize_purchase(combo, movie, showtime, seat):
     movie.total_revenue += combo.total_price
     combo.ticket.generate_qr_code()
 
-    notification_service.send_notification(
-        state.usuario_logado, PAYMENT_SUCCESS,
-        f"Payment confirmed: R$ {combo.total_price:.2f}",
-        {"movie": movie.name, "time": showtime.time, "seat": seat.row_and_number}
-    )
-    notification_service.send_notification(
-        state.usuario_logado, BOOKING_CONFIRMED,
-        f"Booking confirmed for '{movie.name}'",
-        {"movie": movie.name, "time": showtime.time, "seat": seat.row_and_number}
-    )
+    event_bus.publish("payment_success", {
+        "user": state.usuario_logado,
+        "amount": combo.total_price,
+        "movie": movie.name,
+        "time": showtime.time,
+        "seat": seat.row_and_number
+    })
+    
+    event_bus.publish("booking_confirmed", {
+        "user": state.usuario_logado,
+        "movie": movie.name,
+        "time": showtime.time,
+        "seat": seat.row_and_number
+    })
+
     print("\nPurchase completed successfully!")
 
 def comprar_ingresso(movie):
@@ -729,12 +759,15 @@ def comprar_ingresso(movie):
             print("Invalid seat. Please try again.")
             continue
             
-        if assento_selecionado.is_reserved:
-            print("Seat already reserved. History:")
+        status = assento_selecionado.get_status()
+        print(f"Seat {escolha_assento} status: {status}")
+        if status != "Available":
+            print("Seat not available. Showing history:")
             assento_selecionado.get_history()
             continue
             
         if assento_selecionado.temp_reserve(state.usuario_logado, minutes=10):
+            print(f"Seat {assento_selecionado.row_and_number} temporarily reserved until {assento_selecionado.reservation_expiry}.")
             break
         else:
             print("Could not reserve seat. Please try another one.")
@@ -752,6 +785,10 @@ def comprar_ingresso(movie):
     
     if not handle_combo_addition(builder):
         assento_selecionado.release(state.usuario_logado)
+        return
+    
+    if assento_selecionado.check_expiry():
+        print("Your temporary reservation expired. Seat released.")
         return
 
     try:
@@ -772,14 +809,19 @@ def comprar_ingresso(movie):
 
     pagar = input(f"Proceed with payment of R$ {combo.total_price:.2f}? \n[1] Yes\n[2] No\n ").strip()
     if pagar == "1":
-        if not assento_selecionado.check_expiry():
-            if payment(combo.total_price):
-                finalize_purchase(combo, movie, showtime_selecionado, assento_selecionado)
-            else:
-                print("Payment failed. Releasing seat.")
-                assento_selecionado.release(state.usuario_logado)
-        else:
+        if assento_selecionado.check_expiry():
             print("Your temporary reservation has expired. Please start over.")
+            return
+        
+        if assento_selecionado.check_expiry():
+            print("Your temporary reservation has expired. Please start over.")
+            return
+
+        if payment(combo.total_price):
+            finalize_purchase(combo, movie, showtime_selecionado, assento_selecionado)
+        else:
+            print("Payment failed. Releasing seat.")
+            assento_selecionado.release(state.usuario_logado)
     else:
         print("Purchase canceled.")
         assento_selecionado.release(state.usuario_logado)
@@ -834,6 +876,7 @@ def cancelar_compra():
         if 0 <= index < len(state.usuario_logado.booking_history):
             ticket_to_cancel = state.usuario_logado.booking_history[index]
             movie = ticket_to_cancel.showtime.movie
+            seat = ticket_to_cancel.seat
             
             total_canceled_value = ticket_to_cancel.price
             print(f"Canceling ticket: {ticket_to_cancel.name} - R$ {ticket_to_cancel.price:.2f}")
@@ -842,13 +885,20 @@ def cancelar_compra():
                 total_canceled_value += extra.price
                 if hasattr(extra, 'cancel_purchase'):
                     extra.cancel_purchase()
-
+            
+            status = seat.get_status()
+            print(f"Seat {seat.row_and_number} current status: {status}")
+            if status in ("Confirmed", "Temporarily Reserved"):
+                seat.release(state.usuario_logado)
+            else:
+                print("Seat already available.")
+            
             movie.total_revenue -= total_canceled_value
             movie.total_tickets_sold -= 1
     
             ticket_to_cancel.cancel_purchase()
             
-            state.usuario_logado.remove_booking(ticket_to_cancel)
+            state.usuario_logado.booking_history.pop(index)
             
             print(f"Booking and associated extras cancelled successfully! R$ {total_canceled_value:.2f} will be refunded.")
         else:

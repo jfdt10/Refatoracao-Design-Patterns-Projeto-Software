@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 import qrcode
 from services import notification_service
 from utils import SEAT_RESERVATION
-
+from events import event_bus
+from states import AvailableState
 
 
 class USER:
@@ -78,48 +79,39 @@ class ADMIN(USER):
 
 class SEAT:
     def __init__(self, row_and_number):
-        self.row_and_number = row_and_number
-        self.is_reserved = False
+        if isinstance(row_and_number, str):
+            self.row = row_and_number[0]
+            self.number = row_and_number[1:]
+        else:
+            self.row = row_and_number
+            self.number = ""
+        self.row_and_number = f"{self.row}{self.number}"
         self.reservation_history = []
         self.reservation_expiry = None
+        
+        self.state = AvailableState()
+    
+    @property
+    def is_reserved(self):
+        return self.state.get_status() != "Available"
+    
+    def temp_reserve(self, user, minutes=10):
+        return self.state.reserve(self, user, minutes)
     
     def reserver(self, user, minutes=0):  
-        if not self.is_reserved:
-            self.is_reserved = True
-            reservation = {
-                'user_id': user.id,
-                'user_name': user.name,
-                'time': datetime.now(),
-                'action': 'reserved',
-                'expires_at': (datetime.now() + timedelta(minutes=minutes)) if minutes > 0 else None
-            }
-            self.reservation_history.append(reservation)
-            self.reservation_expiry = reservation['expires_at']
-            print(f"Seat {self.row_and_number} reserved for {user.name}!")
-
-            message = f"🪑 Seat {self.row_and_number} reserved successfully!"
-            expiry_str = self.reservation_expiry.strftime("%H:%M:%S") if self.reservation_expiry else "Permanent"
-            data = {"seat": self.row_and_number, "expires_at": expiry_str}
-            notification_service.send_notification(user, SEAT_RESERVATION, message, data)
-            return True
-        return False
+        return self.state.reserve(self, user, minutes)
 
     def release(self, user=None): 
-        if self.is_reserved:
-            self.is_reserved = False
-            user_id = user.id if user and hasattr(user, 'id') else 'system'
-            user_name = user.name if user and hasattr(user, 'name') else 'System'
-            
-            self.reservation_history.append({
-                'user_id': user_id,
-                'user_name': user_name,
-                'time': datetime.now(),
-                'action': 'released'
-            })
-            print(f"Seat {self.row_and_number} reservation cancelled by {user_name}.")
-            self.reservation_expiry = None
-            return True
-        return False
+        return self.state.release(self, user)
+    
+    def confirm(self):
+        return self.state.confirm(self)
+
+    def check_expiry(self):
+        return self.state.check_expiry(self)
+    
+    def get_status(self):
+        return self.state.get_status()
     
     def get_history(self):
         if not self.reservation_history:
@@ -138,25 +130,6 @@ class SEAT:
             print(f" Action: {action}")
             print("-" * 30)
 
-    def temp_reserve(self, user, minutes=15): 
-        if not self.is_reserved:
-            if self.reserver(user, minutes):
-                print(f"Seat {self.row_and_number} reserved for {minutes} minutes.")
-                return True
-        else:
-            print(f"Seat {self.row_and_number} is already reserved.")
-            return False
-
-    def check_expiry(self):
-        if self.is_reserved and self.reservation_expiry:
-            remaining_time = self.reservation_expiry - datetime.now()
-            if remaining_time < timedelta(seconds=0):
-                self.release()
-                print(f" Seat Reservation {self.row_and_number} expired")
-                return True 
-            elif remaining_time < timedelta(minutes=5):
-                print(f" Heads up! Reservation for seat {self.row_and_number} expires in {int(remaining_time.seconds/60)} minutes.")
-        return False
 
 class SHOWTIME:
     def __init__(self, movie, time, screen_number, seats):
