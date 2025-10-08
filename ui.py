@@ -10,8 +10,7 @@ from utils import (
 from builders import ComboBuilder
 from observer import event_bus, analytics_observer
 from commands import CommandInvoker, PurchaseComboCommand, CancelProductCommand, PurchaseProductCommand
-
-invoker = CommandInvoker()
+from facade import cinema_sytem
 
 def inicializar_dados():
     cinesystem = CINEMA("Cinesystem")
