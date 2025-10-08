@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from services import notification_service
 from states import AvailableState
+from utils import USER_ADMIN, USER_REGULAR
 
 
 class USER:
@@ -12,7 +13,7 @@ class USER:
         self.__password = password
         self.booking_history = []
         self.id = str(uuid.uuid4())
-        self.user_type = "regular"
+        self.user_type = USER_REGULAR
         self.created_at = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     @property
@@ -188,7 +189,7 @@ class USER:
 class ADMIN(USER):
     def __init__(self, name, login, password, email=None):
         super().__init__(name, login, password, email)
-        self.user_type = "admin" 
+        self.user_type = USER_ADMIN
         self.permissions = ["manage_movies", "manage_cinemas", "manage_coupons", "view_reports", "send_notifications"]
 
 

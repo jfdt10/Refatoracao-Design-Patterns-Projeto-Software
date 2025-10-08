@@ -5,9 +5,14 @@ BOOKING_CONFIRMED = "booking_confirmed"
 NEW_MOVIE = "new_movie"
 NEW_SHOWTIME = "new_showtime"
 DISCOUNT_COUPON = "discount_coupon"
-SEAT_RESERVATION = "seat_reservation"
+SEAT_RESERVED = "seat_reserved"
+SEAT_RELEASED = "seat_released"
+SEAT_CONFIRMED = "seat_confirmed"
 PAYMENT_SUCCESS = "payment_success"
-CUSTOM_MESSAGE = "custom_message"
+PAYMENT_REFUNDED = "payment_refunded"
+BOOKING_CANCELLED = "booking_cancelled"
+CUSTOM_NOTIFICATION = "custom_notification"
+
 
 # --- Constantes de Cupom ---
 PERCENTAGE = "percentage"
@@ -21,8 +26,6 @@ TICKET_VIP = "VIP"
 # --- Tipos de Usuário ---
 USER_REGULAR = "regular"
 USER_ADMIN = "admin"
-USER_STUDENT = "student"
-USER_VIP = "vip"
 
 #------ Singleton via Metaclass -----
 class MetaSingleton(type):

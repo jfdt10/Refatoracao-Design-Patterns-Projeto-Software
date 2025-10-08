@@ -185,7 +185,7 @@ class PurchaseComboCommand(Command):
             try:
                 ticket = getattr(self.combo, "ticket", None)
                 if ticket and hasattr(self.user, "cancel_booking"):
-                    self.user.cancel_booking(ticket)
+de                    self.user.cancel_booking(ticket)
             except Exception:
                 pass
 

@@ -139,10 +139,4 @@ def get_factory_for_user(user, ticket_type: str = None) -> AbstractFactory:
         elif ticket_lower == 'vip':
             return VIPFactory()
     
-    if hasattr(user, 'user_type'):
-        if user.user_type == 'student':
-            return StudentFactory()
-        elif user.user_type == 'vip':
-            return VIPFactory()
-    
     return StandardFactory()

@@ -46,8 +46,8 @@ class NotificationService(metaclass=MetaSingleton):
 
 class Coupon:
     def __init__(self, code, coupon_type, value, description, valid_until=None, 
-                 min_purchase=0, max_uses=None, applicable_cinemas=None, 
-                 applicable_movies=None, user_type=None):
+             min_purchase=0, max_uses=None, applicable_cinemas=None, 
+             applicable_movies=None, user_type=None, applicable_ticket_types=None):
         self.code = code.upper()
         self.type = coupon_type
         self.value = value
@@ -60,6 +60,7 @@ class Coupon:
         self.applicable_movies = applicable_movies or []
         self.user_type = user_type
         self.is_active = True
+        self.applicable_ticket_types = applicable_ticket_types or []
     
     def is_valid(self):
         if not self.is_active:
@@ -70,10 +71,12 @@ class Coupon:
             return False
         return True
     
-    def can_apply(self, total_amount, cinema_name=None, movie_name=None, user_type=None):
+    def can_apply(self, total_amount, ticket_type=None, cinema_name=None, movie_name=None, user_type=None):
         if not self.is_valid():
             return False
         if total_amount < self.min_purchase:
+            return False
+        if hasattr(self, 'applicable_ticket_types') and self.applicable_ticket_types and ticket_type not in self.applicable_ticket_types:
             return False
         if self.applicable_cinemas and cinema_name not in self.applicable_cinemas:
             return False
@@ -103,12 +106,16 @@ class PromotionManager(metaclass=MetaSingleton):
     
     def initialize_default_coupons(self):
         self.add_coupon(Coupon("STUDENT50", PERCENTAGE, 50, 
-                               "50% off for students", user_type="student"))
+                       "50% off for student tickets", 
+                       applicable_ticket_types=["student"]))
         self.add_coupon(Coupon("WELCOME10", FIXED_AMOUNT, 10,
                                "R$10 off for new users", min_purchase=20, max_uses=1))
         self.add_coupon(Coupon("CINEMA20", PERCENTAGE, 20,
                                "20% off on all tickets", 
                                valid_until=datetime.now() + timedelta(days=30)))
+        self.add_coupon(Coupon("MOVIE15", FIXED_AMOUNT, 15, 
+                               "R$15 off on selected movies", 
+                               applicable_movies=["Toy Story", "Interstellar"], min_purchase=30))
  
     def add_coupon(self, coupon):
         self.coupons[coupon.code] = coupon

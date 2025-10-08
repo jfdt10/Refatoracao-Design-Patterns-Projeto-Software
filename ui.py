@@ -1,4 +1,3 @@
-import re
 import sys
 from datetime import datetime
 import state
@@ -6,7 +5,7 @@ from models import USER, ADMIN, MOVIE, SEAT, CINEMA
 from services import notification_service, promotion_manager, Coupon
 from utils import (
     NEW_MOVIE, NEW_SHOWTIME, DISCOUNT_COUPON, PERCENTAGE, FIXED_AMOUNT,
-    PAYMENT_SUCCESS, BOOKING_CONFIRMED
+    PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED, CUSTOM_NOTIFICATION, TICKET_STANDARD, TICKET_STUDENT, TICKET_VIP, USER_ADMIN
 )
 from builders import ComboBuilder
 from observer import event_bus, analytics_observer
@@ -296,8 +295,8 @@ def add_movie_admin():
         cinema.add_movie(new_movie)
         print(f"Movie '{new_movie.name}' added to {cinema.name} successfully!")
 
-        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
-        event_bus.publish("new_movie", {
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
+        event_bus.publish(NEW_MOVIE, {
             "movie_name": new_movie.name,
             "cinema_name": cinema.name,
             "genre": new_movie.genre,
@@ -341,8 +340,8 @@ def add_showtime_admin():
         selected_movie.add_showtime(showtime_time, screen_number, seats)
         print(f"Showtime {showtime_time} added to '{selected_movie.name}' successfully!")
 
-        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
-        event_bus.publish("new_showtime", {
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
+        event_bus.publish(NEW_SHOWTIME, {
             "movie_name": selected_movie.name,
             "time": showtime_time,
             "targets": targets
@@ -384,8 +383,8 @@ def create_coupon_admin():
         promotion_manager.add_coupon(new_coupon)
         print(f"Coupon '{code}' created successfully!")
 
-        targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
-        event_bus.publish("discount_coupon", {
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
+        event_bus.publish(DISCOUNT_COUPON, {
             "coupon_code": new_coupon.code,
             "description": new_coupon.description,
             "targets": targets
@@ -428,8 +427,8 @@ def send_custom_notification_admin():
         print("Message cannot be empty.")
         return
 
-    targets = [u for u in state.usuarios_registrados.values() if u.user_type != "admin"]
-    event_bus.publish("custom_notification", {
+    targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
+    event_bus.publish(CUSTOM_NOTIFICATION, {
         "message": message,
         "targets": targets
     })
@@ -733,15 +732,15 @@ def finalize_purchase(combo, movie, showtime, seat):
     movie.total_tickets_sold += 1
     movie.total_revenue += combo.total_price
 
-    event_bus.publish("payment_success", {
+    event_bus.publish(PAYMENT_SUCCESS, {
         "user": state.usuario_logado,
         "amount": combo.total_price,
         "movie": movie.name,
         "time": showtime.time,
         "seat": seat.row_and_number
     })
-    
-    event_bus.publish("booking_confirmed", {
+
+    event_bus.publish(BOOKING_CONFIRMED, {
         "user": state.usuario_logado,
         "movie": movie.name,
         "time": showtime.time,
@@ -791,7 +790,7 @@ def comprar_ingresso(movie):
     while True:
         tipo_ingresso_input = input("Enter the ticket type (Standard, Student, VIP): ").strip().lower()
         if tipo_ingresso_input in ["standard", "student", "vip"]:
-            tipo_ingresso = {"standard": "Standard", "student": "Student", "vip": "VIP"}[tipo_ingresso_input]
+            tipo_ingresso = {"standard": TICKET_STANDARD, "student": TICKET_STUDENT, "vip": TICKET_VIP}[tipo_ingresso_input]
             break
         else:
             print("Invalid ticket type. Please choose from Standard, Student, or VIP.")
@@ -972,14 +971,14 @@ def cancelar_compra():
         pass
 
     try:
-        event_bus.publish("booking_cancelled", {
+        event_bus.publish(BOOKING_CANCELLED, {
             "user": state.usuario_logado,
             "movie": getattr(movie, "name", None),
             "time": getattr(showtime, "time", None),
             "seat": seat_id,
             "refund": total_refund
         })
-        event_bus.publish("payment_refunded", {
+        event_bus.publish(PAYMENT_REFUNDED, {
             "user": state.usuario_logado,
             "amount": total_refund,
             "seat": seat_id

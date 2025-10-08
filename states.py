@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from observer import event_bus
-
+from utils import SEAT_RESERVED, SEAT_RELEASED, SEAT_CONFIRMED 
 
 class SeatState(ABC):
     
@@ -47,7 +47,7 @@ class AvailableState(SeatState):
             seat.state = ConfirmedState()
         
         expiry_str = seat.reservation_expiry.strftime("%H:%M:%S") if seat.reservation_expiry else "Permanent"
-        event_bus.publish("seat_reserved", {
+        event_bus.publish(SEAT_RESERVED, {
             "user": user,
             "seat": seat.row_and_number,
             "expires_at": expiry_str
@@ -92,7 +92,7 @@ class TemporaryReservedState(SeatState):
         seat.state = AvailableState()
         
         # Publicar evento para UI/handlers
-        event_bus.publish("seat_released", {
+        event_bus.publish(SEAT_RELEASED, {
             "user": user,
             "seat": seat.row_and_number
         })
@@ -102,7 +102,7 @@ class TemporaryReservedState(SeatState):
         # confirmar reserva temporária
         seat.reservation_expiry = None
         seat.state = ConfirmedState()
-        event_bus.publish("seat_confirmed", {
+        event_bus.publish(SEAT_CONFIRMED, {
             "seat": seat.row_and_number
         })
         return True
@@ -137,8 +137,8 @@ class ConfirmedState(SeatState):
         })
         
         seat.state = AvailableState()
-        
-        event_bus.publish("seat_released", {
+
+        event_bus.publish(SEAT_RELEASED, {
             "user": user,
             "seat": seat.row_and_number
         })

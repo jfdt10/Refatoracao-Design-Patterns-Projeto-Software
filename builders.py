@@ -109,9 +109,10 @@ class ComboBuilder(Builder):
 
         subtotal = self._ticket.price + sum(extra.price for extra in self._extras)
         movie_name = self._ticket.showtime.movie.name if self._ticket and self._ticket.showtime else None
-        user_type = "student" if "student" in self._ticket.name.lower() else "regular"
+        ticket_type = self._ticket.name.split()[0].lower() if self._ticket else "standard"
+        user_type = self.user.user_type
 
-        if not coupon.can_apply(subtotal, None, movie_name, user_type):
+        if not coupon.can_apply(subtotal, ticket_type=ticket_type, cinema_name=None, movie_name=movie_name, user_type=user_type):
             print(f"Coupon '{coupon.code}' cannot be applied to this purchase.")
             return self
         

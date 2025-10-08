@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import threading
-
+from utils import SEAT_RESERVED, SEAT_RELEASED, PAYMENT_SUCCESS, BOOKING_CONFIRMED, NEW_MOVIE, NEW_SHOWTIME, DISCOUNT_COUPON
 
 class Observer(ABC):
     
@@ -96,43 +96,43 @@ class NotificationObserver(Observer):
     
     def _send_notification(self, event, user, payload):
         
-        if event == "seat_reserved":
+        if event == SEAT_RESERVED:
             seat = payload.get("seat", "")
             expires = payload.get("expires_at", "")
             message = f"🪑 Assento {seat} reservado com sucesso!"
             data = {"seat": seat, "expires_at": expires}
             self.notification_service.send_notification(user, "seat_reservation", message, data)
         
-        elif event == "seat_released":
+        elif event == SEAT_RELEASED:
             seat = payload.get("seat", "")
             message = f"Reserva do assento {seat} cancelada."
             self.notification_service.send_notification(user, "seat_released", message, {"seat": seat})
         
-        elif event == "payment_success":
+        elif event == PAYMENT_SUCCESS:
             amount = payload.get("amount", 0)
             message = f"Pagamento confirmado: R$ {amount:.2f}"
             self.notification_service.send_notification(user, "payment_success", message, payload)
         
-        elif event == "booking_confirmed":
+        elif event == BOOKING_CONFIRMED:
             movie = payload.get("movie", "")
             time = payload.get("time", "")
             seat = payload.get("seat", "")
             message = f"Reserva confirmada: '{movie}' às {time} (Assento {seat})"
             self.notification_service.send_notification(user, "booking_confirmed", message, payload)
         
-        elif event == "new_movie":
+        elif event == NEW_MOVIE:
             movie_name = payload.get("movie_name", "")
             cinema_name = payload.get("cinema_name", "")
             message = f"Novo filme disponível: '{movie_name}' no {cinema_name}!"
             self.notification_service.send_notification(user, "new_movie", message, payload)
         
-        elif event == "new_showtime":
+        elif event == NEW_SHOWTIME:
             movie_name = payload.get("movie_name", "")
             time = payload.get("time", "")
             message = f"Nova sessão disponível: '{movie_name}' às {time}!"
             self.notification_service.send_notification(user, "new_showtime", message, payload)
         
-        elif event == "discount_coupon":
+        elif event == DISCOUNT_COUPON:
             coupon_code = payload.get("coupon_code", "")
             description = payload.get("description", "")
             message = f"Novo cupom disponível: {coupon_code} - {description}"
@@ -156,27 +156,27 @@ class AnalyticsObserver(Observer):
         if not isinstance(payload, dict):
             return
         
-        if event == "seat_reserved":
+        if event == SEAT_RESERVED:
             self.metrics["seats_reserved"] += 1
-        
-        elif event == "seat_released":
+
+        elif event == SEAT_RELEASED:
             self.metrics["seats_released"] += 1
         
-        elif event == "payment_success":
+        elif event == PAYMENT_SUCCESS:
             self.metrics["payments_completed"] += 1
             amount = payload.get("amount", 0)
             self.metrics["total_revenue"] += amount
         
-        elif event == "booking_confirmed":
+        elif event == BOOKING_CONFIRMED:
             self.metrics["bookings_confirmed"] += 1
         
-        elif event == "new_movie":
+        elif event == NEW_MOVIE:
             self.metrics["movies_added"] += 1
         
-        elif event == "new_showtime":
+        elif event == NEW_SHOWTIME:
             self.metrics["showtimes_added"] += 1
         
-        elif event == "discount_coupon":
+        elif event == DISCOUNT_COUPON:
             self.metrics["coupons_created"] += 1
     
     def get_report(self):

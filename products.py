@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 import qrcode
-from services import Coupon
 
 #----- Produtos Abstratos------
 class FOOD(ABC):
