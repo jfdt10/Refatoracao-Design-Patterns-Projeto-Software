@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
+from observer import event_bus
 
 
 class SeatState(ABC):
@@ -28,7 +29,6 @@ class SeatState(ABC):
 class AvailableState(SeatState):
     
     def reserve(self, seat, user, minutes=0):
-        from events import event_bus
         
         reservation = {
             'user_id': user.id,
@@ -40,8 +40,7 @@ class AvailableState(SeatState):
         seat.reservation_history.append(reservation)
         seat.reservation_expiry = reservation['expires_at']
         
-        print(f"✅ Seat {seat.row_and_number} reserved for {user.name}!")
-        
+        # transição de estado baseada em minutes
         if minutes > 0:
             seat.state = TemporaryReservedState()
         else:
@@ -56,11 +55,11 @@ class AvailableState(SeatState):
         return True
     
     def release(self, seat, user=None):
-        print("Seat is already available.")
+        # já disponível -> nada a fazer
         return False
     
     def confirm(self, seat):
-        print("Cannot confirm an available seat.")
+        # não é possível confirmar um assento disponível sem reserva
         return False
     
     def check_expiry(self, seat):
@@ -73,11 +72,10 @@ class AvailableState(SeatState):
 class TemporaryReservedState(SeatState):
     
     def reserve(self, seat, user, minutes=0):
-        print("Seat is already reserved.")
+        # já reservado temporariamente
         return False
     
     def release(self, seat, user=None):
-        from events import event_bus
         
         user_id = user.id if user and hasattr(user, 'id') else 'system'
         user_name = user.name if user and hasattr(user, 'name') else 'System'
@@ -90,12 +88,10 @@ class TemporaryReservedState(SeatState):
         })
         seat.reservation_expiry = None
 
-        print(f"Seat {seat.row_and_number} reservation cancelled by {user_name}.")
-
         # Transição de estado
         seat.state = AvailableState()
         
-        # Publicar evento
+        # Publicar evento para UI/handlers
         event_bus.publish("seat_released", {
             "user": user,
             "seat": seat.row_and_number
@@ -103,14 +99,17 @@ class TemporaryReservedState(SeatState):
         return True
     
     def confirm(self, seat):
-        print(f"Seat {seat.row_and_number} confirmed!")
+        # confirmar reserva temporária
         seat.reservation_expiry = None
         seat.state = ConfirmedState()
+        event_bus.publish("seat_confirmed", {
+            "seat": seat.row_and_number
+        })
         return True
     
     def check_expiry(self, seat):
         if seat.reservation_expiry and datetime.now() >= seat.reservation_expiry:
-            print(f"⏰ Reservation for seat {seat.row_and_number} expired. Releasing...")
+            # quando expirar, liberar e publicar evento via release()
             self.release(seat)
             return True
         return False
@@ -122,11 +121,10 @@ class TemporaryReservedState(SeatState):
 class ConfirmedState(SeatState):
     
     def reserve(self, seat, user, minutes=0):
-        print(" Seat is already confirmed.")
+        # assento já confirmado
         return False
     
     def release(self, seat, user=None):
-        from events import event_bus
         
         user_id = user.id if user and hasattr(user, 'id') else 'system'
         user_name = user.name if user and hasattr(user, 'name') else 'System'
@@ -138,8 +136,6 @@ class ConfirmedState(SeatState):
             'action': 'released'
         })
         
-        print(f"Confirmed seat {seat.row_and_number} released by {user_name}.")
-        
         seat.state = AvailableState()
         
         event_bus.publish("seat_released", {
@@ -149,7 +145,7 @@ class ConfirmedState(SeatState):
         return True
     
     def confirm(self, seat):
-        print("Seat is already confirmed.")
+        # já confirmado
         return False
     
     def check_expiry(self, seat):

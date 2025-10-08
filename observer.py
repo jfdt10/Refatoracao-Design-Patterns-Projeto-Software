@@ -158,33 +158,26 @@ class AnalyticsObserver(Observer):
         
         if event == "seat_reserved":
             self.metrics["seats_reserved"] += 1
-            print(f"[Analytics] Total assentos reservados: {self.metrics['seats_reserved']}")
         
         elif event == "seat_released":
             self.metrics["seats_released"] += 1
-            print(f"[Analytics] Total assentos liberados: {self.metrics['seats_released']}")
         
         elif event == "payment_success":
             self.metrics["payments_completed"] += 1
             amount = payload.get("amount", 0)
             self.metrics["total_revenue"] += amount
-            print(f"[Analytics] Pagamentos: {self.metrics['payments_completed']} | Receita total: R$ {self.metrics['total_revenue']:.2f}")
         
         elif event == "booking_confirmed":
             self.metrics["bookings_confirmed"] += 1
-            print(f"[Analytics] Total reservas confirmadas: {self.metrics['bookings_confirmed']}")
         
         elif event == "new_movie":
             self.metrics["movies_added"] += 1
-            print(f"[Analytics] Total filmes adicionados: {self.metrics['movies_added']}")
         
         elif event == "new_showtime":
             self.metrics["showtimes_added"] += 1
-            print(f"[Analytics] Total sessões criadas: {self.metrics['showtimes_added']}")
         
         elif event == "discount_coupon":
             self.metrics["coupons_created"] += 1
-            print(f"[Analytics] Total cupons criados: {self.metrics['coupons_created']}")
     
     def get_report(self):
         return f"""

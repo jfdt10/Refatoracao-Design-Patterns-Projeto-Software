@@ -1,3 +1,4 @@
+import re
 import sys
 from datetime import datetime
 import state
@@ -8,8 +9,10 @@ from utils import (
     PAYMENT_SUCCESS, BOOKING_CONFIRMED
 )
 from builders import ComboBuilder
-from events import event_bus, analytics_observer
+from observer import event_bus, analytics_observer
+from commands import CommandInvoker, PurchaseComboCommand, CancelProductCommand, PurchaseProductCommand
 
+invoker = CommandInvoker()
 
 def inicializar_dados():
     cinesystem = CINEMA("Cinesystem")
@@ -202,19 +205,29 @@ def ver_avaliacoes():
         print("Invalid option. Please try again.")
 
 def ver_bilhete_qrcode():
-    if not state.usuario_logado.booking_history:
-        print("You have no bookings to view.")
+    active_bookings = [t for t in state.usuario_logado.booking_history if not getattr(t, "cancelled", False)]
+    if not active_bookings:
+        print("You have no active bookings to view.")
         return
 
-    state.usuario_logado.view_booking_history()
+    print("\n Your Active Bookings:")
+    print("=" * 50)
+    for i, ticket in enumerate(active_bookings, 1):
+        try:
+            movie_name = getattr(getattr(getattr(ticket, "showtime", None), "movie", None), "name", "N/A")
+            seat = getattr(getattr(ticket, "seat", None), "row_and_number", "N/A")
+            print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()} - {movie_name} (Seat {seat})")
+        except Exception:
+            print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()}")
+    
     try:
         escolha = int(input("Enter the number of the booking to view the QR Code for (or '0' to go back): "))
         if escolha == 0:
             return
         
         index = escolha - 1
-        if 0 <= index < len(state.usuario_logado.booking_history):
-            ticket = state.usuario_logado.booking_history[index]
+        if 0 <= index < len(active_bookings):
+            ticket = active_bookings[index]
             ticket.generate_qr_code()
         else:
             print("Invalid booking number.")
@@ -251,11 +264,11 @@ def admin_panel():
         else:
             print("Invalid option.")
 
-def view_analytics_summary()
+def view_analytics_summary():
     if "view_reports" not in state.usuario_logado.permissions:
         print("Access denied.")
         return
-    
+
     print(analytics_observer.get_report())
     input("\n Press ENTER to go back...")
 
@@ -445,16 +458,18 @@ def processar_login():
 def registrar():
     name = input("Name: ")
     login_user = input("Login: ")
-    print("The password must be a string and have at least 5 characters.")
+    email = input("Email: ")
     password_user = input("Password: ")
     
     if login_user in state.usuarios_registrados:
         print("This login already exists. Please try another one.")
-    elif len(password_user) < 5:
-         print("The password must be a string and have at least 5 characters.")
-    else:
-        state.usuarios_registrados[login_user] = USER(name, login_user, password_user)
+        return
+    
+    try:
+        state.usuarios_registrados[login_user] = USER(name, login_user, password_user, email)
         print("User successfully registered!")
+    except Exception as e:
+        print(f"Registration failed: {e}")
 
 def ver_cinemas():
     print("\n--- Choose a Cinema ---")
@@ -709,15 +724,14 @@ def finalize_purchase(combo, movie, showtime, seat):
         print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
 
     combo.ticket.extras = combo.extras
-    combo.ticket.purchase_product()
-
+    combo.ticket.purchase_product(state.usuario_logado)
     for extra in combo.extras:
         if hasattr(extra, 'purchase_product'):
-            extra.purchase_product()
+            extra.purchase_product(state.usuario_logado)
+
     state.usuario_logado.add_booking(combo.ticket)
     movie.total_tickets_sold += 1
     movie.total_revenue += combo.total_price
-    combo.ticket.generate_qr_code()
 
     event_bus.publish("payment_success", {
         "user": state.usuario_logado,
@@ -735,6 +749,8 @@ def finalize_purchase(combo, movie, showtime, seat):
     })
 
     print("\nPurchase completed successfully!")
+    combo.ticket.generate_qr_code()
+    return True
 
 def comprar_ingresso(movie):
     print(f"\n--- Buy Ticket for '{movie.name}' ---")
@@ -812,18 +828,19 @@ def comprar_ingresso(movie):
         if assento_selecionado.check_expiry():
             print("Your temporary reservation has expired. Please start over.")
             return
-        
-        if assento_selecionado.check_expiry():
-            print("Your temporary reservation has expired. Please start over.")
-            return
-
         if payment(combo.total_price):
-            finalize_purchase(combo, movie, showtime_selecionado, assento_selecionado)
+            cmd = PurchaseComboCommand(combo, movie, showtime_selecionado, assento_selecionado, state.usuario_logado, finalize_purchase)
+            invoker.execute_command(cmd)
+            if not getattr(cmd, "executed", False):
+                print("Purchase failed. Seat will be released.")
+                assento_selecionado.release(state.usuario_logado)
+            else:
+                pass
         else:
             print("Payment failed. Releasing seat.")
             assento_selecionado.release(state.usuario_logado)
     else:
-        print("Purchase canceled.")
+        print("Purchase canceled. Releasing seat.")
         assento_selecionado.release(state.usuario_logado)
 
 def avaliar_filme():
@@ -861,47 +878,114 @@ def avaliar_filme():
             print("Invalid option. Please try again.")
 
 def cancelar_compra():
-    if not state.usuario_logado.booking_history:
-        print("You have no bookings to cancel.")
-        return
+    active_bookings = [t for t in state.usuario_logado.booking_history if not getattr(t, "cancelled", False)]
     
-    state.usuario_logado.view_booking_history()
+    if not active_bookings:
+        print("You have no active bookings to cancel.")
+        return False
+
+    print("\n Your Active Bookings:")
+    print("=" * 50)
+    for i, ticket in enumerate(active_bookings, 1):
+        try:
+            movie_name = getattr(getattr(getattr(ticket, "showtime", None), "movie", None), "name", "N/A")
+            seat = getattr(getattr(ticket, "seat", None), "row_and_number", "N/A")
+            print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()} - {movie_name} (Seat {seat})")
+        except Exception:
+            print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()}")
     
-    escolha = input("Enter the number of the booking you want to cancel (or '0' to go back): ")
-    if escolha == '0':
-        return
+    escolha = input("Enter the number of the booking you want to cancel (or '0' to go back): ").strip()
+    if escolha == "0":
+        return False
     
     try:
         index = int(escolha) - 1
-        if 0 <= index < len(state.usuario_logado.booking_history):
-            ticket_to_cancel = state.usuario_logado.booking_history[index]
-            movie = ticket_to_cancel.showtime.movie
-            seat = ticket_to_cancel.seat
-            
-            total_canceled_value = ticket_to_cancel.price
-            print(f"Canceling ticket: {ticket_to_cancel.name} - R$ {ticket_to_cancel.price:.2f}")
-
-            for extra in ticket_to_cancel.extras:
-                total_canceled_value += extra.price
-                if hasattr(extra, 'cancel_purchase'):
-                    extra.cancel_purchase()
-            
-            status = seat.get_status()
-            print(f"Seat {seat.row_and_number} current status: {status}")
-            if status in ("Confirmed", "Temporarily Reserved"):
-                seat.release(state.usuario_logado)
-            else:
-                print("Seat already available.")
-            
-            movie.total_revenue -= total_canceled_value
-            movie.total_tickets_sold -= 1
-    
-            ticket_to_cancel.cancel_purchase()
-            
-            state.usuario_logado.booking_history.pop(index)
-            
-            print(f"Booking and associated extras cancelled successfully! R$ {total_canceled_value:.2f} will be refunded.")
-        else:
-            print("Invalid number.")
-    except (ValueError, IndexError):
+    except Exception:
         print("Invalid option. Please try again.")
+        return False
+
+    if not (0 <= index < len(active_bookings)):
+        print("Invalid number.")
+        return False
+
+    ticket = active_bookings[index]
+    seat = getattr(ticket, "seat", None)
+    showtime = getattr(ticket, "showtime", None)
+    movie = getattr(showtime, "movie", None)
+
+    try:
+        total_refund = float(getattr(ticket, "price", 0.0) or 0.0)
+    except Exception:
+        total_refund = 0.0
+    for extra in getattr(ticket, "extras", []) or []:
+        try:
+            total_refund += float(getattr(extra, "price", 0.0) or 0.0)
+        except Exception:
+            pass
+
+    print(f"Canceling ticket: {getattr(ticket, 'name', 'TICKET')} - R$ {float(getattr(ticket, 'price', 0.0) or 0.0):.2f}")
+
+    for extra in getattr(ticket, "extras", []) or []:
+        try:
+            invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+        except Exception:
+            try:
+                if hasattr(extra, "cancel_purchase"):
+                    extra.cancel_purchase(state.usuario_logado)
+            except Exception:
+                pass
+
+    status = seat.get_status() if seat else "Unknown"
+    seat_id = getattr(seat, "row_and_number", "N/A")
+    print(f"Seat {seat_id} current status: {status}")
+
+    cmd_ticket = None
+    try:
+        cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
+        invoker.execute_command(cmd_ticket)
+    except Exception:
+        pass
+
+    try:
+        if seat:
+            seat.release(state.usuario_logado)
+    except Exception:
+        pass
+
+    if movie:
+        try:
+            movie.total_tickets_sold = max(0, getattr(movie, "total_tickets_sold", 0) - 1)
+            movie.total_revenue = max(0.0, getattr(movie, "total_revenue", 0.0) - float(total_refund or 0.0))
+        except Exception:
+            pass
+
+    try:
+        state.usuario_logado.cancel_booking(ticket)
+    except Exception:
+        pass
+
+    try:
+        if not getattr(cmd_ticket, "executed", False):
+            if hasattr(ticket, "cancel_purchase"):
+                ticket.cancel_purchase(state.usuario_logado)
+    except Exception:
+        pass
+
+    try:
+        event_bus.publish("booking_cancelled", {
+            "user": state.usuario_logado,
+            "movie": getattr(movie, "name", None),
+            "time": getattr(showtime, "time", None),
+            "seat": seat_id,
+            "refund": total_refund
+        })
+        event_bus.publish("payment_refunded", {
+            "user": state.usuario_logado,
+            "amount": total_refund,
+            "seat": seat_id
+        })
+    except Exception:
+        pass
+
+    print(f"\nBooking and associated extras cancelled successfully! R$ {total_refund:.2f} will be refunded.")
+    return True
