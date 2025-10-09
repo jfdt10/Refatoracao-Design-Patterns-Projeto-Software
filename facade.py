@@ -5,10 +5,7 @@ from models import USER, CINEMA, MOVIE, SEAT
 from observer import event_bus
 from utils import PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED
 from typing import List
-from commands import PurchaseComboCommand, CancelProductCommand
-from commands import CommandInvoker as GlobalInvoker
-
-
++from commands import PurchaseComboCommand, CancelProductCommand, CommandInvoker
 #-------------- Subsistemas do Facade-----------------
 
 class Notification_Subsystem:
@@ -334,5 +331,4 @@ class CinemaSystemFacade:
     def get_user_notifications(self, user_id: str, unread_only: bool = False):
         return self.notifications.get_notifications(user_id, unread_only)
 
-
-cinema_system = CinemaSystemFacade(invoker=GlobalInvoker())
+cinema_system = CinemaSystemFacade(invoker=CommandInvoker())

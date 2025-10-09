@@ -9,8 +9,8 @@ from utils import (
 )
 from builders import ComboBuilder
 from observer import event_bus, analytics_observer
-from commands import CommandInvoker, PurchaseComboCommand, CancelProductCommand, PurchaseProductCommand
-from facade import cinema_sytem
+from commands import PurchaseComboCommand, CancelProductCommand
+from facade import cinema_system
 
 def inicializar_dados():
     cinesystem = CINEMA("Cinesystem")
@@ -828,7 +828,7 @@ def comprar_ingresso(movie):
             return
         if payment(combo.total_price):
             cmd = PurchaseComboCommand(combo, movie, showtime_selecionado, assento_selecionado, state.usuario_logado, finalize_purchase)
-            invoker.execute_command(cmd)
+            cinema_system.invoker.execute_command(cmd)
             if not getattr(cmd, "executed", False):
                 print("Purchase failed. Seat will be released.")
                 assento_selecionado.release(state.usuario_logado)
@@ -925,7 +925,7 @@ def cancelar_compra():
 
     for extra in getattr(ticket, "extras", []) or []:
         try:
-            invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+             cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
         except Exception:
             try:
                 if hasattr(extra, "cancel_purchase"):
@@ -940,7 +940,7 @@ def cancelar_compra():
     cmd_ticket = None
     try:
         cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
-        invoker.execute_command(cmd_ticket)
+        cinema_system.invoker.execute_command(cmd_ticket)
     except Exception:
         pass
 
