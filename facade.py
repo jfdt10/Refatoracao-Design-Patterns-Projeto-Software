@@ -5,13 +5,14 @@ from models import USER, CINEMA, MOVIE, SEAT
 from observer import event_bus
 from utils import PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED
 from typing import List
-+from commands import PurchaseComboCommand, CancelProductCommand, CommandInvoker
+from commands import PurchaseComboCommand, CancelProductCommand, CommandInvoker
+
 #-------------- Subsistemas do Facade-----------------
 
 class Notification_Subsystem:
     def __init__(self):
-        self._notifier = notification_service 
-    
+        self._notifier = notification_service
+
     def send(self, user, notification_type, message, data=None):
         return self._notifier.send_notification(user, notification_type, message, data)
 
@@ -37,7 +38,7 @@ class Promotion_Subsystem:
 
     def list_active(self):
         return self._promotion_manager.list_active_coupons()
-    
+
     def validate_and_apply(self, coupon_code: str, builder: ComboBuilder, user):
         coupons = self.get_coupon(coupon_code)
         if not coupons:
@@ -57,11 +58,11 @@ class ComboManagementSubsystem:
     def add_ticket_to_combo(self, builder: ComboBuilder, ticket_type, seat: SEAT, showtime, price: float = 25.0):
         builder.add_ticket(ticket_type, seat, showtime, price)
         return builder
-    
-    def add_extras_to_combo(self, builder: ComboBuilder, extras: List[dict]): 
+
+    def add_extras_to_combo(self, builder: ComboBuilder, extras: List[dict]):
         for extra in extras:
             extra_type = extra.get("type", "").lower()
-            
+
             if extra_type == "popcorn":
                 builder.add_popcorn(size=extra.get("size", "M"))
             elif extra_type == "soda":
@@ -76,17 +77,17 @@ class ComboManagementSubsystem:
                 builder.add_nachos(topping=extra.get("topping", "cheese"))
             elif extra_type == "hotdog":
                 builder.add_hotdog(size=extra.get("size", "regular"))
-        
+
         return builder
-         
-    def build_combo(self, builder: ComboBuilder): 
+
+    def build_combo(self, builder: ComboBuilder):
         return builder.build()
-    
+
 
 class PaymentSubsystem:
     def process_payment(self, method: str, amount: float, user):
         method = method.lower()
-        
+
         if method in ["credit", "credito", "crédito"]:
             return self._process_credit(amount, user)
         elif method in ["debit", "debito", "débito"]:
@@ -95,12 +96,12 @@ class PaymentSubsystem:
             return self._process_pix(amount, user)
         else:
             return False, f"Método '{method}' não suportado"
-    
+
     def _process_credit(self, amount: float, user):
         transaction_id = f"CC-{datetime.now().timestamp()}"
         print(f"[Payment] Cartão de Crédito: R${amount:.2f} - {user.name}")
         return True, transaction_id
-    
+
     def _process_debit(self, amount: float, user):
         transaction_id = f"DB-{datetime.now().timestamp()}"
         print(f"[Payment] Cartão de Débito: R${amount:.2f} - {user.name}")
@@ -113,19 +114,19 @@ class PaymentSubsystem:
 
 
 class BookingSubsystem:
-    
+
     def reserve_seat(self, seat: SEAT, user, minutes: int = 10):
         return seat.temp_reserve(user, minutes)
 
     def confirm_seat(self, seat: SEAT):
         return seat.confirm()
-    
-    def release_seat(self, seat: SEAT, user=None):  
+
+    def release_seat(self, seat: SEAT, user=None):
         return seat.release(user)
 
     def check_seat_expiry(self, seat: SEAT):
         return seat.check_expiry()
-    
+
 
 # ---------------- Facade Sistema ---------------------
 
@@ -136,7 +137,7 @@ class CinemaSystemFacade:
                  combo_subsystem: ComboManagementSubsystem = None,
                  payment_subsystem: PaymentSubsystem = None,
                  booking_subsystem: BookingSubsystem = None,
-                 invoker: CommandInvoker = None):  
+                 invoker: CommandInvoker = None):
 
         self.notifications = notification_subsystem or Notification_Subsystem()
         self.promotions = promotion_subsystem or Promotion_Subsystem()
@@ -159,54 +160,88 @@ class CinemaSystemFacade:
             "seat_confirmed": False
         }
 
+        seat_reserved = False
         if not self.bookings.reserve_seat(seat, user, minutes=10):
-            result["message"] = f"Não foi possível reservar o assento {seat.row_and_number}"
+            result["message"] = f"Não foi possível reservar o assento {getattr(seat, 'row_and_number', 'N/A')}"
             return result
-        
+        seat_reserved = True
+
         try:
             builder = self.combos.create_builder(user)
             self.combos.add_ticket_to_combo(builder, ticket_type, seat, showtime)
-            
+
             if extras:
                 self.combos.add_extras_to_combo(builder, extras)
-            
-            result["original_price"] = builder._total_price
-            
+
+            original_price = getattr(builder, "_total_price", 0.0)
+            result["original_price"] = original_price
+
             if coupon_code:
-                success, message = self.promotions.validate_and_apply(coupon_code, builder, user)
-                if success:
-                    result["discount"] = result["original_price"] - builder._total_price
-                    self.notifications.send(
-                        user, "coupon_applied",
-                        f"Cupom aplicado! Desconto: R${result['discount']:.2f}",
-                        {"coupon": coupon_code, "discount": result["discount"]}
-                    )
+                try:
+                    success, message = self.promotions.validate_and_apply(coupon_code, builder, user)
+                except Exception as e:
+                    success, message = False, f"Error applying coupon: {e}"
+
+                new_total = getattr(builder, "_total_price", original_price)
+                discount = max(0.0, original_price - new_total)
+                result["discount"] = discount
+
+                if success and discount > 0:
+                    try:
+                        self.notifications.send(
+                            user, "coupon_applied",
+                            f"Cupom '{coupon_code}' aplicado! Desconto: R$ {discount:.2f}",
+                            {"coupon": coupon_code, "discount": discount}
+                        )
+                    except Exception:
+                        pass
+                elif success and discount == 0:
+                    try:
+                        self.notifications.send(
+                            user, "coupon_applied_no_effect",
+                            f"Cupom '{coupon_code}' aplicado, mas sem desconto (verifique regras).",
+                            {"coupon": coupon_code}
+                        )
+                    except Exception:
+                        pass
                 else:
-                    self.notifications.send(user, "coupon_failed", message)
-            
+                    try:
+                        self.notifications.send(user, "coupon_failed", message)
+                    except Exception:
+                        pass
+
             combo = self.combos.build_combo(builder)
             result["combo"] = combo
-            result["final_price"] = combo.total_price
-            
+            result["final_price"] = getattr(combo, "total_price", 0.0)
+
             if self.bookings.check_seat_expiry(seat):
                 result["message"] = "Reserva expirou. Tente novamente."
-                self.bookings.release_seat(seat, user)
+                try:
+                    self.bookings.release_seat(seat, user)
+                except Exception:
+                    pass
                 return result
-            
+
             payment_success, transaction_id = self.payments.process_payment(
                 payment_method,
                 combo.total_price,
                 user
             )
-            
+
             if not payment_success:
                 result["message"] = f"Falha no pagamento: {transaction_id}"
-                self.bookings.release_seat(seat, user)
-                self.notifications.send(user, "payment_failed", result["message"])
+                try:
+                    self.bookings.release_seat(seat, user)
+                except Exception:
+                    pass
+                try:
+                    self.notifications.send(user, "payment_failed", result["message"])
+                except Exception:
+                    pass
                 return result
-            
+
             result["transaction_id"] = transaction_id
-            
+
             cmd = PurchaseComboCommand(
                 combo=combo,
                 movie=movie,
@@ -215,120 +250,147 @@ class CinemaSystemFacade:
                 user=user,
                 finalize_fn=self._finalize_purchase
             )
-            
+
             self.invoker.execute_command(cmd)
-            
+
             if not getattr(cmd, "executed", False):
                 result["message"] = "Falha ao executar comando de compra"
-                self.bookings.release_seat(seat, user)
                 return result
-            
+
             result["seat_confirmed"] = True
             result["success"] = True
             result["message"] = "Compra realizada com sucesso!"
-            
+
         except Exception as e:
             result["message"] = f"Erro durante a compra: {e}"
-            self.bookings.release_seat(seat, user)
-        
+        finally:
+            try:
+                if seat_reserved and not result.get("seat_confirmed", False):
+                    self.bookings.release_seat(seat, user)
+            except Exception:
+                pass
         return result
 
     def _finalize_purchase(self, combo, movie, showtime, seat):
         """Método auxiliar para finalizar compra (usado pelo Command)"""
         if self.bookings.confirm_seat(seat):
             combo.ticket.extras = combo.extras
-            
+
             event_bus.publish(PAYMENT_SUCCESS, {
                 "user": combo.user,
                 "amount": combo.total_price,
-                "movie": movie.name,
-                "time": showtime.time,
-                "seat": seat.row_and_number
+                "movie": getattr(movie, "name", None),
+                "time": getattr(showtime, "time", None),
+                "seat": getattr(seat, "row_and_number", None)
             })
-            
+
             event_bus.publish(BOOKING_CONFIRMED, {
                 "user": combo.user,
-                "movie": movie.name,
-                "time": showtime.time,
-                "seat": seat.row_and_number
+                "movie": getattr(movie, "name", None),
+                "time": getattr(showtime, "time", None),
+                "seat": getattr(seat, "row_and_number", None)
             })
-            
-            self.notifications.send(
-                combo.user, "purchase_success",
-                f"Compra confirmada! {movie.name} - Assento {seat.row_and_number}",
-                {
-                    "ticket_id": getattr(combo.ticket, 'id', None),
-                    "final_price": combo.total_price
-                }
-            )
+
+            try:
+                self.notifications.send(
+                    combo.user, "purchase_success",
+                    f"Compra confirmada! {getattr(movie, 'name', '')} - Assento {getattr(seat, 'row_and_number', '')}",
+                    {
+                        "ticket_id": getattr(combo.ticket, 'id', None),
+                        "final_price": combo.total_price
+                    }
+                )
+            except Exception:
+                pass
             return True
         return False
 
     def cancel_booking(self, user: USER, ticket_id: str, movie: MOVIE, seat: SEAT):
         result = {
             "success": False,
-            "refunded_amount": 0.0,
+            "refund_amount": 0.0,
             "message": ""
         }
-        
+
         ticket = next((t for t in user.booking_history if getattr(t, 'id', None) == ticket_id), None)
         if not ticket:
             result["message"] = f"Ticket ID {ticket_id} não encontrado nas reservas do usuário."
             return result
-        
+
         try:
             cmd = CancelProductCommand(ticket, user)
             self.invoker.execute_command(cmd)
-            
+
             if not getattr(cmd, "executed", False):
                 result["message"] = "Falha ao executar comando de cancelamento"
                 return result
-            
+
             refund = float(getattr(ticket, "price", 0.0) or 0.0)
             for extra in getattr(ticket, "extras", []) or []:
-                refund += float(getattr(extra, "price", 0.0) or 0.0)
-            
+                try:
+                    refund += float(getattr(extra, "price", 0.0) or 0.0)
+                except Exception:
+                    pass
+
             result["refund_amount"] = refund
-            
-            self.bookings.release_seat(seat, user)
-            
-            user.cancel_booking(ticket)
-            
+
+            if seat is not None:
+                try:
+                    self.bookings.release_seat(seat, user)
+                except Exception:
+                    pass
+
+            try:
+                user.cancel_booking(ticket)
+            except Exception:
+                pass
+
             if movie:
-                movie.total_tickets_sold = max(0, movie.total_tickets_sold - 1)
-                movie.total_revenue = max(0.0, movie.total_revenue - refund)
-            
-            event_bus.publish(BOOKING_CANCELLED, {
-                "user": user,
-                "movie": movie.name if movie else None,
-                "seat": seat.row_and_number,
-                "refund": refund
-            })
-            
-            event_bus.publish(PAYMENT_REFUNDED, {
-                "user": user,
-                "amount": refund,
-                "seat": seat.row_and_number
-            })
-            
-            self.notifications.send(
-                user, "booking_cancelled",
-                f"Reserva cancelada. Reembolso: R${refund:.2f}",
-                {"refund": refund, "seat": seat.row_and_number}
-            )
-            
+                try:
+                    movie.total_tickets_sold = max(0, getattr(movie, "total_tickets_sold", 0) - 1)
+                    movie.total_revenue = max(0.0, getattr(movie, "total_revenue", 0.0) - refund)
+                except Exception:
+                    pass
+
+            seat_id = getattr(seat, "row_and_number", "N/A")
+            movie_name = getattr(movie, "name", None)
+            try:
+                event_bus.publish(BOOKING_CANCELLED, {
+                    "user": user,
+                    "movie": movie_name,
+                    "seat": seat_id,
+                    "refund": refund
+                })
+                event_bus.publish(PAYMENT_REFUNDED, {
+                    "user": user,
+                    "amount": refund,
+                    "seat": seat_id
+                })
+            except Exception:
+                pass
+
+            try:
+                self.notifications.send(
+                    user, "booking_cancelled",
+                    f"Reserva cancelada. Reembolso: R${refund:.2f}",
+                    {"refund": refund, "seat": seat_id}
+                )
+            except Exception:
+                pass
+
             result["success"] = True
             result["message"] = f"Reserva cancelada. Reembolso: R${refund:.2f}"
-            
+
         except Exception as e:
             result["message"] = f"Erro ao cancelar: {e}"
-        
+
         return result
-    
+
     def list_active_coupons(self):
         return self.promotions.list_active()
-    
+
     def get_user_notifications(self, user_id: str, unread_only: bool = False):
         return self.notifications.get_notifications(user_id, unread_only)
+
 
 cinema_system = CinemaSystemFacade(invoker=CommandInvoker())
