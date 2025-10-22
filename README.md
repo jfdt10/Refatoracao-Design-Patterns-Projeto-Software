@@ -1,5 +1,6 @@
 # MovieTicketSystem
 This project is a system for selling movie tickets and popcorn combos, developed in Python. It simulates a complete user experience through a command line interface, using the principles of Object-Oriented Programming (OOP).
+
 ### Features
 Functions that have been implemented:
 * Cinema and Movie Listings
@@ -49,6 +50,20 @@ Functions that have been implemented:
 *  **Onde foi usado?** Nas classes CommandInvoker, PurchaseProductCommand, CancelProductCommand e PurchaseComboCommand em commands.py. Cada comando encapsula uma ação (ex.: comprar um produto ou cancelar uma reserva) e suporta execução (execute()) e desfazimento (undo()), com o CommandInvoker gerenciando um histórico de comandos para operações reversíveis.
 * **Motivo e Vantagem:** Operações como comprar ingressos ou combos são complexas e podem falhar (ex.: pagamento rejeitado), exigindo rollback. O padrão Command encapsula essas operações em objetos, permitindo executá-las de forma desacoplada e reversível, facilitando undo/redo e testes. Por exemplo, PurchaseComboCommand agrupa subcomandos para extras (pipoca, etc.) e o ingresso principal, garantindo atomicidade — se um falha, todos são desfeitos. Isso melhora a robustez do sistema, especialmente em cenários de erro, e permite extensões como logging ou replay de comandos sem alterar a lógica de negócio.
 
+# Padrões de Projeto Estruturais Implementados (Structural Design Patterns)
+
+### 1. Adapter
+* **Onde foi usado?** Nas classes `EmailNotificationAdapter`, `SMSNotificationAdapter` e `PushNotificationAdapter` em `adapter.py`, que adaptam serviços externos (`EmailService`, `SMSService`, `PushNotificationService`) para a interface comum `NotificationChannel`. O `MultiChannelNotificationService` em `services.py` utiliza esses adaptadores para enviar notificações por múltiplos canais.
+* **Motivo e Vantagem:** Os serviços externos de email, SMS e push têm interfaces incompatíveis entre si (ex.: `send_email()` vs `send_sms()` vs `send_push()`). O padrão Adapter converte essas interfaces distintas em uma interface unificada (`send(user, subject, message, data)`), permitindo que o sistema trate todos os canais de notificação de forma homogênea. Isso facilita a adição de novos canais (ex.: WhatsApp, Telegram) sem alterar o código existente — basta criar um novo adapter. Além disso, cada adapter mantém seu histórico de mensagens enviadas (`sent_messages`), facilitando auditoria e debugging.
+
+### 2. Decorator
+* **Onde foi usado?** Na classe abstrata `ProductDecorator` e suas implementações concretas `SpecialPackagingDecorator`, `ExtraItemDecorator` e `GiftWrapDecorator` em `decorator.py`. Os decoradores envolvem produtos (pipoca, refrigerantes, etc.) para adicionar funcionalidades extras (embalagem especial +R$5, itens adicionais, embrulho para presente +R$3) sem modificar as classes de produtos originais.
+* **Motivo e Vantagem:** Em um sistema de venda de combos, produtos podem ser personalizados de várias formas (embalagem especial, extras, presentes), e combinar essas opções manualmente geraria uma explosão de subclasses (ex.: `PopcornComEmbalagamEspecial`, `PopcornComEmbalagamEPresenteEExtra`). O padrão Decorator permite compor funcionalidades dinamicamente em tempo de execução (`SpecialPackagingDecorator(ExtraItemDecorator(produto))`), mantendo o código limpo e extensível. Além disso, os decoradores delegam automaticamente métodos como `purchase_product()` e `promotion()` ao produto decorado, preservando o polimorfismo e garantindo que descontos e cupons funcionem corretamente em produtos decorados.
+
+### 3. Facade
+* **Onde foi usado?** Na classe `CinemaSystemFacade` em `facade.py`, que unifica cinco subsistemas complexos: `Notification_Subsystem`, `Promotion_Subsystem`, `ComboManagementSubsystem`, `PaymentSubsystem` e `BookingSubsystem`. A facade expõe métodos simplificados como `complete_ticket_purchase()` e `cancel_booking()` que orquestram múltiplas operações internas.
+* **Motivo e Vantagem:** Processos como comprar um ingresso envolvem coordenar subsistemas de reserva de assentos, criação de combos, aplicação de cupons, processamento de pagamento, execução de comandos e publicação de eventos — uma complexidade que não deve vazar para a interface do usuário. A Facade encapsula toda essa lógica em métodos de alto nível, simplificando drasticamente o código em `ui.py` (que antes tinha dezenas de linhas para uma compra, agora reduzidas a uma chamada). Isso promove manutenibilidade, pois mudanças nos subsistemas (ex.: adicionar novo método de pagamento) não afetam a UI, apenas a implementação interna da facade. Além disso, a facade gerencia transações de forma atômica, garantindo rollback automático em caso de falhas (ex.: liberar assento se o pagamento falhar).
+
 ### Applied OOP Concepts
 The project was built based on important pillars of Object-Oriented Programming:
 * Inheritance and Abstract Classes: The PRODUCT class is an abstract class that defines a common interface for all products (such as TICKET and POPCORN). The child classes (TICKET, POPCORN) inherit this interface and provide their own implementations of the methods.
@@ -59,6 +74,11 @@ The project was built based on important pillars of Object-Oriented Programming:
     * A SHOWTIME has a MOVIE and a list of SEATS.
     * A TICKET has a SEAT and a SHOWTIME.
   
+
+## Contributors
+
+* Marcela Rocha Silva — Autora original
+* Jean Felipe Duarte Tenório — Refatorador / Manutenção (refatoração e implementação de novos padrões)
 
 ## Tips for Use
 
@@ -73,5 +93,5 @@ The project was built based on important pillars of Object-Oriented Programming:
 - pip install -r requirements.txt
 - cd Refatoracao-Design-Patterns-Projeto-Software
 
-## Versão Modular
+# Run 
 - python main.py

@@ -2,7 +2,7 @@ from services import notification_service, promotion_manager
 from datetime import datetime
 from builders import ComboBuilder
 from models import USER, CINEMA, MOVIE, SEAT
-from observer import event_bus
+from observer import event_bus, multi_channel_service
 from utils import PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED
 from typing import List
 from commands import PurchaseComboCommand, CancelProductCommand, CommandInvoker
@@ -10,17 +10,17 @@ from commands import PurchaseComboCommand, CancelProductCommand, CommandInvoker
 #-------------- Subsistemas do Facade-----------------
 
 class Notification_Subsystem:
-    def __init__(self):
-        self._notifier = notification_service
+    def __init__(self, notification_service_instance):
+        self._notifier = notification_service_instance
 
-    def send(self, user, notification_type, message, data=None):
-        return self._notifier.send_notification(user, notification_type, message, data)
+    def send(self, user, notification_type, message, data=None, channels=None):
+        return self._notifier.send_notification(user, notification_type, message, data, channels)
 
     def get_notifications(self, user_id, unread_only=False):
         return self._notifier.get_user_notifications(user_id, unread_only)
 
     def mark_as_read(self, notification_id):
-        return self._notifier.mark_notification_as_read(notification_id)
+        return self._notifier.mark_as_read(notification_id)
 
 
 class Promotion_Subsystem:
@@ -28,7 +28,7 @@ class Promotion_Subsystem:
         self._promotion_manager = promotion_manager
 
     def coupons_initialization(self):
-        self._promotion_manager.initialize_coupons()
+        self._promotion_manager.initialize_default_coupons()
 
     def add_coupon(self, coupon):
         self._promotion_manager.add_coupon(coupon)
@@ -139,7 +139,7 @@ class CinemaSystemFacade:
                  booking_subsystem: BookingSubsystem = None,
                  invoker: CommandInvoker = None):
 
-        self.notifications = notification_subsystem or Notification_Subsystem()
+        self.notifications = notification_subsystem or Notification_Subsystem(multi_channel_service)
         self.promotions = promotion_subsystem or Promotion_Subsystem()
         self.combos = combo_subsystem or ComboManagementSubsystem()
         self.payments = payment_subsystem or PaymentSubsystem()
@@ -392,5 +392,5 @@ class CinemaSystemFacade:
     def get_user_notifications(self, user_id: str, unread_only: bool = False):
         return self.notifications.get_notifications(user_id, unread_only)
 
-
+# Criar instância do sistema com facade
 cinema_system = CinemaSystemFacade(invoker=CommandInvoker())

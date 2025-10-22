@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime
 import state
+import uuid
 from models import USER, ADMIN, MOVIE, SEAT, CINEMA
 from services import notification_service, promotion_manager, Coupon
 from utils import (
@@ -11,6 +12,8 @@ from builders import ComboBuilder
 from observer import event_bus, analytics_observer
 from commands import PurchaseComboCommand, CancelProductCommand
 from facade import cinema_system
+from decorator import SpecialPackagingDecorator, ExtraItemDecorator, GiftWrapDecorator
+from services import multi_channel_service
 
 def inicializar_dados():
     cinesystem = CINEMA("Cinesystem")
@@ -38,10 +41,21 @@ def inicializar_dados():
     state.cinemas["Kinoplex"] = kinoplex
     state.cinemas["Centerplex"] = centerplex
     
-    state.usuarios_registrados["marcela"] = USER("Marcela", "marcela", "12345", "marcela@email.com")
-    state.usuarios_registrados["joao"] = USER("João", "joao", "senha123", "joao@cinema.com")
-    state.usuarios_registrados["pedro"] = USER("Pedro", "pedro", "senha456", "pedro@cinema.com")
-    state.usuarios_registrados["admin"] = ADMIN("Admin", "admin", "admin123", "admin@cinema.com")
+    marcela = USER("Marcela", "marcela", "12345", "marcela@email.com", "82 3344-9999")
+    marcela.device_token = f"device_{uuid.uuid4().hex[:16]}"
+    state.usuarios_registrados["marcela"] = marcela
+
+    joao = USER("João", "joao", "senha123", "joao@cinema.com", "(11) 99999-2222")
+    joao.device_token = f"device_{uuid.uuid4().hex[:16]}"
+    state.usuarios_registrados["joao"] = joao
+    
+    pedro = USER("Pedro", "pedro", "senha456", "pedro@cinema.com") 
+    state.usuarios_registrados["pedro"] = pedro
+
+    admin = ADMIN("Admin", "admin", "admin123", "admin@cinema.com", "(11) 99999-0030")
+    admin.device_token = f"device_{uuid.uuid4().hex[:16]}"
+    state.usuarios_registrados["admin"] = admin
+    
     state.usuarios_registrados["system"] = USER("System", "system", "system", "system@cinema.com")
 
 def menu_principal():
@@ -241,6 +255,7 @@ def admin_panel():
         print("[4] View System Reports")
         print("[5] Send Custom Notification")
         print("[6] View Analytics Summary")
+        print("[7] View Notification Channels Statistics")
         print("[0] Back to Main Menu")
         
         escolha = input("Select an option: ")
@@ -257,6 +272,8 @@ def admin_panel():
             send_custom_notification_admin()
         elif escolha == "6":
             view_analytics_summary()
+        elif escolha == "7":
+            view_notification_statistics_admin()
         elif escolha == "0":
             break
         else:
@@ -294,14 +311,24 @@ def add_movie_admin():
         cinema.add_movie(new_movie)
         print(f"Movie '{new_movie.name}' added to {cinema.name} successfully!")
 
+        print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
+        print("Available channels: app, email, sms, push")
+        channels_input = input("Channels: ")
+        selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
+
+        if not selected_channels:
+            print("No channels selected for new movie notification.")
+            return
+
         targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
         event_bus.publish(NEW_MOVIE, {
             "movie_name": new_movie.name,
             "cinema_name": cinema.name,
             "genre": new_movie.genre,
-            "targets": targets
+            "targets": targets,
+            "channels": selected_channels
         })
-                
+        print(f"New movie notification sent via channels: {', '.join(selected_channels)}.")
     except (ValueError, IndexError):
         print("Invalid option.")
 
@@ -339,13 +366,23 @@ def add_showtime_admin():
         selected_movie.add_showtime(showtime_time, screen_number, seats)
         print(f"Showtime {showtime_time} added to '{selected_movie.name}' successfully!")
 
+        print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
+        print("Available channels: app, email, sms, push")
+        channels_input = input("Channels: ")
+        selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
+
+        if not selected_channels:
+            print("No channels selected for new showtime notification.")
+            return
+
         targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
         event_bus.publish(NEW_SHOWTIME, {
             "movie_name": selected_movie.name,
             "time": showtime_time,
-            "targets": targets
+            "targets": targets,
+            "channels": selected_channels
         })
-
+        print(f"New showtime notification sent via channels: {', '.join(selected_channels)}.")
     except (ValueError, IndexError):
         print("Invalid option.")
 
@@ -426,12 +463,66 @@ def send_custom_notification_admin():
         print("Message cannot be empty.")
         return
 
+    print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
+    print("Available channels: app, email, sms, push")
+    channels_input = input("Channels: ")
+    selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
+
+    if not selected_channels:
+        print("No channels selected. Notification will not be sent.")
+        return
+
     targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
     event_bus.publish(CUSTOM_NOTIFICATION, {
         "message": message,
-        "targets": targets
+        "targets": targets,
+        "channels": selected_channels
     })
-    print("Custom notifications sent to all users.")
+    print(f"Custom notifications sent to all users via channels: {', '.join(selected_channels)}.")
+
+def view_notification_statistics_admin():
+    if "view_reports" not in state.usuario_logado.permissions:
+        print("Access denied.")
+        return
+    print("\n" + "=" * 60)
+    print(" NOTIFICATION CHANNELS STATISTICS")
+    print("=" * 60)
+    
+    stats = multi_channel_service.get_channel_statistics()
+    total_sent = sum(stats.values())
+    
+    print(f"\n Total messages sent across all channels: {total_sent}")
+    print("-" * 60)
+
+    for channel_name, channel in multi_channel_service.channels.items():
+        count = stats.get(channel_name, 0)
+        print(f"\n {channel_name.upper()} Channel: {count} messages sent")
+        
+        if channel and hasattr(channel, 'sent_messages') and channel.sent_messages:
+            print(f"   Last 5 messages:")
+            for i, msg in enumerate(channel.sent_messages[-5:], 1):
+                timestamp = msg.get('timestamp', 'N/A')
+                if isinstance(timestamp, datetime):
+                    timestamp = timestamp.strftime("%d/%m/%Y %H:%M:%S")
+                
+                if channel_name == "email":
+                    print(f"   [{i}] To: {msg.get('email', 'N/A')} | Subject: {msg.get('subject', 'N/A')} | Time: {timestamp}")
+                elif channel_name == "sms":
+                    print(f"   [{i}] To: {msg.get('phone', 'N/A')} | Time: {timestamp}")
+                elif channel_name == "push":
+                    device = msg.get('device_token', 'N/A')[:12] + "..." if msg.get('device_token') else 'N/A'
+                    print(f"   [{i}] Device: {device} | Title: {msg.get('subject', 'N/A')} | Time: {timestamp}")
+        else:
+            print(f"   No messages sent yet.")
+    
+    print("\n" + "-" * 60)
+    print(f" In-App Notifications: {len(multi_channel_service.notifications)} total")
+    unread_count = sum(1 for n in multi_channel_service.notifications if not n['read'])
+    read_count = len(multi_channel_service.notifications) - unread_count
+    print(f"   Unread: {unread_count} | Read: {read_count}")
+    
+    print("=" * 60)
+    input("\nPress ENTER to go back...")
 
 def login():
     resposta = input("\nAre you already registered? \n[1] Yes\n[2] No\n ")
@@ -458,14 +549,23 @@ def registrar():
     login_user = input("Login: ")
     email = input("Email: ")
     password_user = input("Password: ")
+    phone = input("Phone (optional, format: (82) 99900-0030 or leave blank): ").strip()
     
     if login_user in state.usuarios_registrados:
         print("This login already exists. Please try another one.")
         return
     
     try:
-        state.usuarios_registrados[login_user] = USER(name, login_user, password_user, email)
+        phone_value = phone if phone else None
+        new_user = USER(name, login_user, password_user, email, phone_value)
+
+        if phone_value:
+            new_user.device_token = f"device_{uuid.uuid4().hex[:16]}"
+        
+        state.usuarios_registrados[login_user] = new_user
         print("User successfully registered!")
+        if phone_value:
+            print(f"SMS and Push notifications enabled for {phone_value}")
     except Exception as e:
         print(f"Registration failed: {e}")
 
@@ -547,9 +647,9 @@ def handle_combo_addition(builder):
     print("[1] Choose a Pre-built Combo (Quick)")
     print("[2] Customize Your Own Combo")
     print("[3] No combo, just the ticket")
-    
+
     combo_option = input("Select an option: ").strip()
-    
+
     if combo_option == "1":
         from builders import ComboDirector
         director = ComboDirector()
@@ -611,6 +711,7 @@ def handle_combo_addition(builder):
             print("[8] Apply Coupon")
             print("[9] Finish and Proceed to Payment")
             print("[10] Remove an Extra")
+            print("[11] Decorate a Product")
             print("[0] Cancel")
             extra_choice = input("Select an option: ").strip()
 
@@ -695,6 +796,63 @@ def handle_combo_addition(builder):
                         print("Invalid number.")
                 except ValueError:
                     print("Invalid input. Please enter a number.")
+            elif extra_choice == "11":
+                if not builder._extras:
+                    print("No products to decorate. Add a product first.")
+                    continue
+                
+                print("\nSelect a product to decorate:")
+                for i, extra in enumerate(builder._extras, 1):
+                    print(f"[{i}] {extra.name} - R$ {extra.price:.2f}")
+                
+                try:
+                    idx = int(input("Enter the number of the product to decorate: ")) - 1
+                    if 0 <= idx < len(builder._extras):
+                        product = builder._extras[idx]
+                        
+                        print("\nChoose decoration:")
+                        print("[1] Special Packaging (+R$5.00)")
+                        print("[2] Add Extra Item")
+                        print("[3] Gift Wrap (+R$3.00)")
+                        print("[0] Cancel")
+                        
+                        dec_choice = input("Select decoration: ").strip()
+                        
+                        if dec_choice == "1":
+                            builder._total_price -= product.price
+                            decorated_product = SpecialPackagingDecorator(product)
+                            builder._extras[idx] = decorated_product
+                            builder._total_price += decorated_product.price
+                            print(f"Added special packaging to {product.name}!")
+                            
+                        elif dec_choice == "2":
+                            extra_item = input("Enter extra item name: ").strip()
+                            try:
+                                extra_price = float(input("Enter extra price: R$"))
+                                builder._total_price -= product.price
+                                decorated_product = ExtraItemDecorator(product, extra_item, extra_price)
+                                builder._extras[idx] = decorated_product
+                                builder._total_price += decorated_product.price
+                                print(f"Added {extra_item} to {product.name}!")
+                            except ValueError:
+                                print("Invalid price. Decoration canceled.")
+                                
+                        elif dec_choice == "3":
+                            message = input("Enter gift message (optional): ").strip()
+                            builder._total_price -= product.price
+                            decorated_product = GiftWrapDecorator(product, message)
+                            builder._extras[idx] = decorated_product
+                            builder._total_price += decorated_product.price
+                            print(f"Added gift wrap to {product.name}!")
+                            
+                        elif dec_choice == "0":
+                            print("Decoration canceled.")
+                        else:
+                            print("Invalid option.")
+                    else:
+                        print("Invalid selection.")
+                except ValueError:
+                    print("Please enter a valid number.")
             elif extra_choice == "0":
                 print("Combo addition canceled.")
                 return False

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import threading
-from utils import SEAT_RESERVED, SEAT_RELEASED, PAYMENT_SUCCESS, BOOKING_CONFIRMED, NEW_MOVIE, NEW_SHOWTIME, DISCOUNT_COUPON
+from utils import SEAT_RESERVED, SEAT_RELEASED, PAYMENT_SUCCESS, BOOKING_CONFIRMED, NEW_MOVIE, NEW_SHOWTIME, DISCOUNT_COUPON, CUSTOM_NOTIFICATION
+from services import multi_channel_service
 
 class Observer(ABC):
     
@@ -95,6 +96,7 @@ class NotificationObserver(Observer):
         self._send_notification(event, user, payload)
     
     def _send_notification(self, event, user, payload):
+        channels = payload.get("channels", ["app"])
         
         if event == SEAT_RESERVED:
             seat = payload.get("seat", "")
@@ -110,34 +112,47 @@ class NotificationObserver(Observer):
         
         elif event == PAYMENT_SUCCESS:
             amount = payload.get("amount", 0)
+            movie = payload.get("movie", "")
+            time = payload.get("time", "")
+            seat = payload.get("seat", "")
             message = f"Pagamento confirmado: R$ {amount:.2f}"
-            self.notification_service.send_notification(user, "payment_success", message, payload)
+            data = {"amount": amount, "movie": movie, "time": time, "seat": seat}
+            self.notification_service.send_notification(user, "payment_success", message, data)
         
         elif event == BOOKING_CONFIRMED:
             movie = payload.get("movie", "")
             time = payload.get("time", "")
             seat = payload.get("seat", "")
             message = f"Reserva confirmada: '{movie}' às {time} (Assento {seat})"
-            self.notification_service.send_notification(user, "booking_confirmed", message, payload)
+            data = {"movie": movie, "time": time, "seat": seat}
+            self.notification_service.send_notification(user, "booking_confirmed", message, data)
         
         elif event == NEW_MOVIE:
             movie_name = payload.get("movie_name", "")
             cinema_name = payload.get("cinema_name", "")
+            genre = payload.get("genre", "")
             message = f"Novo filme disponível: '{movie_name}' no {cinema_name}!"
-            self.notification_service.send_notification(user, "new_movie", message, payload)
+            data = {"movie_name": movie_name, "cinema_name": cinema_name, "genre": genre}
+            self.notification_service.send_notification(user, "new_movie", message, data, channels=channels)
         
         elif event == NEW_SHOWTIME:
             movie_name = payload.get("movie_name", "")
             time = payload.get("time", "")
             message = f"Nova sessão disponível: '{movie_name}' às {time}!"
-            self.notification_service.send_notification(user, "new_showtime", message, payload)
+            data = {"movie_name": movie_name, "time": time}
+            self.notification_service.send_notification(user, "new_showtime", message, data, channels=channels)
         
         elif event == DISCOUNT_COUPON:
             coupon_code = payload.get("coupon_code", "")
             description = payload.get("description", "")
             message = f"Novo cupom disponível: {coupon_code} - {description}"
-            self.notification_service.send_notification(user, "discount_coupon", message, payload)
-
+            data = {"coupon_code": coupon_code, "description": description}
+            self.notification_service.send_notification(user, "discount_coupon", message, data)
+        
+        elif event == CUSTOM_NOTIFICATION:
+            message = payload.get("message", "")
+            data = {"message": message}
+            self.notification_service.send_notification(user, "custom_notification", message, data, channels=channels)
 class AnalyticsObserver(Observer):
     
     def __init__(self):
@@ -193,6 +208,12 @@ Cupons Criados: {self.metrics['coupons_created']}
 ==============================
 """
 
+# Instanciação do EventBus e Observers Globais
 event_bus = EventBus()
 analytics_observer = AnalyticsObserver()
+
+# Instanciação e Registro dos Observers
+notification_observer = NotificationObserver(multi_channel_service)
+event_bus.attach(notification_observer)
+event_bus.attach(analytics_observer)
 

@@ -3,14 +3,16 @@ from datetime import datetime
 from services import notification_service
 from states import AvailableState
 from utils import USER_ADMIN, USER_REGULAR
-
+import re
 
 class USER:
-    def __init__(self, name, login, password, email=None):  
+    def __init__(self, name, login, password, email=None, phone=None):  
         self.name = name
         self.login = login
         self.email = email if email else f"{login}@example.com" 
-        self.__password = password
+        self.password = password
+        self.phone = phone
+        self.device_token = None  
         self.booking_history = []
         self.id = str(uuid.uuid4())
         self.user_type = USER_REGULAR
@@ -30,6 +32,34 @@ class USER:
     @property
     def email(self):
         return self.__email
+    @property
+    def phone(self):
+        return self.__phone
+    @property
+    def device_token(self):
+        return self.__device_token
+    
+    @phone.setter
+    def phone(self, new_phone):
+        if new_phone is None:
+            self.__phone = None
+            return
+        if not isinstance(new_phone, str):
+            raise TypeError("Telefone deve ser uma string.")
+        if new_phone.strip().startswith("()"):
+            raise ValueError("Telefone inválido (DDD vazio).")
+        cleaned_phone = re.sub(r'\D', '', new_phone)
+        regex_br = r'^\d{10,11}$'
+
+        if re.match(regex_br, cleaned_phone):
+            self.__phone = cleaned_phone
+        else:
+            raise ValueError(f"Número de telefone inválido: '{new_phone}'. Deve ter 10 ou 11 dígitos.")
+    
+    @device_token.setter
+    def device_token(self, new_token):
+        self.__device_token = new_token
+
     @name.setter
     def name(self, new_name):
         if not isinstance(new_name, str) or len(new_name) < 2 or not all(c.isalpha() or c.isspace() for c in new_name):
@@ -187,8 +217,8 @@ class USER:
 
 
 class ADMIN(USER):
-    def __init__(self, name, login, password, email=None):
-        super().__init__(name, login, password, email)
+    def __init__(self, name, login, password, email=None, phone=None):
+        super().__init__(name, login, password, email, phone)
         self.user_type = USER_ADMIN
         self.permissions = ["manage_movies", "manage_cinemas", "manage_coupons", "view_reports", "send_notifications"]
 
