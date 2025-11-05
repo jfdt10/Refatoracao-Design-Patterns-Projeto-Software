@@ -70,7 +70,7 @@ class EventBus(Subject):
             try:
                 obs.update(self, event, payload)
             except Exception as e:
-                print(f"[EventBus] Erro no observer para '{event}': {e}")
+                print(f"[EventBus] Error in observer for '{event}': {e}")
     
     def publish(self, event, payload=None):
         self.notify(event, payload)
@@ -196,15 +196,15 @@ class AnalyticsObserver(Observer):
     
     def get_report(self):
         return f"""
-=== RELATÓRIO DE ANALYTICS ===
-Assentos Reservados: {self.metrics['seats_reserved']}
-Assentos Liberados: {self.metrics['seats_released']}
-Pagamentos Completados: {self.metrics['payments_completed']}
-Reservas Confirmadas: {self.metrics['bookings_confirmed']}
-Receita Total: R$ {self.metrics['total_revenue']:.2f}
-Filmes Adicionados: {self.metrics['movies_added']}
-Sessões Criadas: {self.metrics['showtimes_added']}
-Cupons Criados: {self.metrics['coupons_created']}
+=== Analytics Report ===
+Seats Reserved: {self.metrics['seats_reserved']}
+Seats Released: {self.metrics['seats_released']}
+Payments Completed: {self.metrics['payments_completed']}
+Bookings Confirmed: {self.metrics['bookings_confirmed']}
+Total Revenue: R$ {self.metrics['total_revenue']:.2f}
+Movies Added: {self.metrics['movies_added']}
+Showtimes Added: {self.metrics['showtimes_added']}
+Coupons Created: {self.metrics['coupons_created']}
 ==============================
 """
 

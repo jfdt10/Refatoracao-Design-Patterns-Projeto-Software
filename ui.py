@@ -1,4 +1,5 @@
 import sys
+import re
 from datetime import datetime
 import state
 import uuid
@@ -6,14 +7,40 @@ from models import USER, ADMIN, MOVIE, SEAT, CINEMA
 from services import notification_service, promotion_manager, Coupon
 from utils import (
     NEW_MOVIE, NEW_SHOWTIME, DISCOUNT_COUPON, PERCENTAGE, FIXED_AMOUNT,
-    PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED, CUSTOM_NOTIFICATION, TICKET_STANDARD, TICKET_STUDENT, TICKET_VIP, USER_ADMIN
+    PAYMENT_SUCCESS, BOOKING_CONFIRMED, BOOKING_CANCELLED, PAYMENT_REFUNDED, 
+    CUSTOM_NOTIFICATION, TICKET_STANDARD, TICKET_STUDENT, TICKET_VIP, USER_ADMIN
 )
-from builders import ComboBuilder
+from builders import ComboBuilder,ComboDirector
 from observer import event_bus, analytics_observer
 from commands import PurchaseComboCommand, CancelProductCommand
 from facade import cinema_system
 from decorator import SpecialPackagingDecorator, ExtraItemDecorator, GiftWrapDecorator
 from services import multi_channel_service
+
+from exceptions import (
+    InvalidEmailException,
+    InvalidCPFException,
+    InvalidPhoneException,
+    InvalidPasswordException,
+    InvalidPaymentMethodException,
+    PaymentLimitExceededException,
+    PaymentProcessingException,
+    InvalidCouponException,
+    CouponExpiredException,
+    CouponUsageLimitException,
+    MinimumPurchaseException,
+    NotificationDeliveryException,
+    SeatAlreadyReservedException,
+    SeatNotAvailableException,
+    ReservationExpiredException,
+    BookingException,
+    PaymentException,
+    CouponException,
+    InvalidCredentialsException,
+    UserNotFoundException,
+    UnauthorizedAccessException
+)
+
 
 def inicializar_dados():
     cinesystem = CINEMA("Cinesystem")
@@ -57,6 +84,7 @@ def inicializar_dados():
     state.usuarios_registrados["admin"] = admin
     
     state.usuarios_registrados["system"] = USER("System", "system", "system", "system@cinema.com")
+
 
 def menu_principal():
     print("\nWelcome to the Movie Ticketing System!")
@@ -114,6 +142,7 @@ def menu_principal():
             else:
                 print("Invalid option. Please try again.")
 
+
 def menu_notifications():
     while True:
         print("\n--- Notifications ---")
@@ -141,12 +170,13 @@ def menu_notifications():
                             print("Could not find notification.")
                     else:
                         print("Invalid number.")
-                except ValueError:
-                    print("Invalid input.")
+                except (ValueError, TypeError):
+                    print("Invalid input. Please enter a valid number.")
         elif escolha == "0":
             return
         else:
             print("Invalid option. Please try again.")
+
 
 def view_coupons():
     active_coupons = promotion_manager.list_active_coupons()
@@ -175,6 +205,7 @@ def view_coupons():
                 print(f" User type: {coupon.user_type}")
             print("-" * 50)
 
+
 def ver_avaliacoes():
     print("\n--- Choose a Cinema to See Movie Reviews ---")
     cinema_keys = list(state.cinemas.keys())
@@ -187,7 +218,11 @@ def ver_avaliacoes():
         if escolha_cinema == '0':
             return
         
-        cinema_nome = cinema_keys[int(escolha_cinema) - 1]
+        cinema_idx = int(escolha_cinema) - 1
+        if not (0 <= cinema_idx < len(cinema_keys)):
+            raise IndexError("Invalid cinema number.")
+        
+        cinema_nome = cinema_keys[cinema_idx]
         cinema_obj = state.cinemas[cinema_nome]
 
         print(f"\n--- Movies at {cinema_obj.name} ---")
@@ -199,7 +234,11 @@ def ver_avaliacoes():
         if escolha_filme == '0':
             return
             
-        movie_to_view = cinema_obj.movies[int(escolha_filme) - 1]
+        movie_idx = int(escolha_filme) - 1
+        if not (0 <= movie_idx < len(cinema_obj.movies)):
+            raise IndexError("Invalid movie number.")
+            
+        movie_to_view = cinema_obj.movies[movie_idx]
 
         print(f"\n--- Reviews for '{movie_to_view.name}' ---")
         if not movie_to_view.reviews:
@@ -213,8 +252,11 @@ def ver_avaliacoes():
                 print(f'"{review["comment"]}"')
                 print("-" * 20)
 
-    except (ValueError, IndexError):
-        print("Invalid option. Please try again.")
+    except (ValueError, IndexError) as e:
+        print(f"Invalid option: {e}. Please enter a valid number.")
+    except KeyError:
+        print("Error: Cinema or movie not found in the system.")
+
 
 def ver_bilhete_qrcode():
     active_bookings = [t for t in state.usuario_logado.booking_history if not getattr(t, "cancelled", False)]
@@ -229,7 +271,7 @@ def ver_bilhete_qrcode():
             movie_name = getattr(getattr(getattr(ticket, "showtime", None), "movie", None), "name", "N/A")
             seat = getattr(getattr(ticket, "seat", None), "row_and_number", "N/A")
             print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()} - {movie_name} (Seat {seat})")
-        except Exception:
+        except (AttributeError, TypeError):
             print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()}")
     
     try:
@@ -243,8 +285,9 @@ def ver_bilhete_qrcode():
             ticket.generate_qr_code()
         else:
             print("Invalid booking number.")
-    except ValueError:
+    except (ValueError, TypeError):
         print("Invalid input. Please enter a number.")
+
 
 def admin_panel():
     while True:
@@ -279,62 +322,138 @@ def admin_panel():
         else:
             print("Invalid option.")
 
+
 def view_analytics_summary():
-    if "view_reports" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "view_reports" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "view_reports"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
 
     print(analytics_observer.get_report())
     input("\n Press ENTER to go back...")
 
+
 def add_movie_admin():
-    if "manage_movies" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "manage_movies" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "manage_movies"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
     
     print("\n--- ADD NEW MOVIE ---")
-    name = input("Movie name: ")
-    duration = int(input("Duration (minutes): "))
-    genre = input("Genre: ")
-    
-    print("\nSelect cinema:")
-    cinema_keys = list(state.cinemas.keys())
-    for i, cinema_name in enumerate(cinema_keys, 1):
-        print(f"[{i}] {cinema_name}")
     
     try:
-        cinema_choice = int(input("Cinema number: ")) - 1
-        cinema_name = cinema_keys[cinema_choice]
-        cinema = state.cinemas[cinema_name]
+        name = input("Movie name: ").strip()
+        if not name:
+            print("Error: Movie name cannot be empty.")
+            return
         
-        new_movie = MOVIE(name, duration, genre)
-        cinema.add_movie(new_movie)
-        print(f"Movie '{new_movie.name}' added to {cinema.name} successfully!")
+        try:
+            duration_input = input("Duration (minutes): ").strip()
+            duration = int(duration_input)
+            if duration <= 0:
+                print("Error: Duration must be a positive number.")
+                return
+        except ValueError:
+            print("Error: Invalid duration. Must be a number.")
+            return
+        
+        genre = input("Genre: ").strip()
+        if not genre:
+            print("Error: Genre cannot be empty.")
+            return
+        
+        print("\nSelect cinema:")
+        cinema_keys = list(state.cinemas.keys())
+        for i, cinema_name in enumerate(cinema_keys, 1):
+            print(f"[{i}] {cinema_name}")
+        
+        try:
+            cinema_choice_input = input("Cinema number: ").strip()
+            cinema_choice = int(cinema_choice_input) - 1
+            
+            if cinema_choice < 0 or cinema_choice >= len(cinema_keys):
+                print(f"Error: Invalid cinema number. Please choose between 1 and {len(cinema_keys)}.")
+                return
+                
+            cinema_name = cinema_keys[cinema_choice]
+            cinema = state.cinemas[cinema_name]
+            
+        except ValueError:
+            print("Error: Invalid input. Cinema number must be a number.")
+            return
+        except IndexError:
+            print(f"Error: Invalid cinema number. Please choose between 1 and {len(cinema_keys)}.")
+            return
+        
+        try:
+            new_movie = MOVIE(name, duration, genre)
+            cinema.add_movie(new_movie)
+            print(f"Movie '{new_movie.name}' added to {cinema.name} successfully!")
+        except Exception as e:
+            print(f"Error creating movie: {e}")
+            return
 
         print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
         print("Available channels: app, email, sms, push")
-        channels_input = input("Channels: ")
-        selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
-
+        channels_input = input("Channels: ").strip()
+        
+        if not channels_input:
+            print("No channels selected. Movie added but no notifications sent.")
+            return
+        
+        selected_channels = [c.strip().lower() for c in channels_input.split(',') if c.strip()]
+        valid_channels = ['app', 'email', 'sms', 'push']
+        invalid_channels = [ch for ch in selected_channels if ch not in valid_channels]
+        
+        if invalid_channels:
+            print(f"Warning: Invalid channels ignored: {', '.join(invalid_channels)}")
+            selected_channels = [ch for ch in selected_channels if ch in valid_channels]
+        
         if not selected_channels:
-            print("No channels selected for new movie notification.")
+            print("No valid channels selected. Movie added but no notifications sent.")
             return
 
         targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
-        event_bus.publish(NEW_MOVIE, {
-            "movie_name": new_movie.name,
-            "cinema_name": cinema.name,
-            "genre": new_movie.genre,
-            "targets": targets,
-            "channels": selected_channels
-        })
-        print(f"New movie notification sent via channels: {', '.join(selected_channels)}.")
-    except (ValueError, IndexError):
-        print("Invalid option.")
+        
+        try:
+            event_bus.publish(NEW_MOVIE, {
+                "movie_name": new_movie.name,
+                "cinema_name": cinema.name,
+                "genre": new_movie.genre,
+                "targets": targets,
+                "channels": selected_channels
+            })
+            print(f"New movie notification sent via channels: {', '.join(selected_channels)}.")
+        except NotificationDeliveryException as e:
+            print(f"Warning: Notification delivery issue - {e}")
+        except Exception as e:
+            print(f"Warning: Failed to send notifications - {e}")
+            
+    except KeyboardInterrupt:
+        print("\nOperation canceled by user.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
 
 def add_showtime_admin():
-    if "manage_movies" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "manage_movies" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "manage_movies"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
     
     print("\n--- ADD NEW SHOWTIME ---")
@@ -343,9 +462,23 @@ def add_showtime_admin():
         cinema_keys = list(state.cinemas.keys())
         for i, cinema_name in enumerate(cinema_keys, 1):
             print(f"[{i}] {cinema_name}")
-        cinema_choice = int(input("Cinema number: ")) - 1
-        cinema_name = cinema_keys[cinema_choice]
-        cinema = state.cinemas[cinema_name]
+        
+        try:
+            cinema_choice_input = input("Cinema number: ").strip()
+            cinema_choice = int(cinema_choice_input) - 1
+            
+            if cinema_choice < 0 or cinema_choice >= len(cinema_keys):
+                print(f"Error: Invalid cinema number. Please choose between 1 and {len(cinema_keys)}.")
+                return
+                
+            cinema_name = cinema_keys[cinema_choice]
+            cinema = state.cinemas[cinema_name]
+        except ValueError:
+            print("Error: Invalid input. Cinema number must be a number.")
+            return
+        except IndexError:
+            print(f"Error: Invalid cinema number. Please choose between 1 and {len(cinema_keys)}.")
+            return
 
         if not cinema.movies:
             print(f"No movies in {cinema.name} to add a showtime to.")
@@ -354,41 +487,113 @@ def add_showtime_admin():
         print("\nSelect movie:")
         for i, movie in enumerate(cinema.movies, 1):
             print(f"[{i}] {movie.name}")
-        movie_choice = int(input("Movie number: ")) - 1
-        selected_movie = cinema.movies[movie_choice]
         
-        showtime_time = input("Showtime time (HH:MM): ")
-        screen_number = int(input("Screen number: "))
-        num_seats = int(input("Number of seats for this showtime: "))
+        try:
+            movie_choice_input = input("Movie number: ").strip()
+            movie_choice = int(movie_choice_input) - 1
+            
+            if movie_choice < 0 or movie_choice >= len(cinema.movies):
+                print(f"Error: Invalid movie number. Please choose between 1 and {len(cinema.movies)}.")
+                return
+                
+            selected_movie = cinema.movies[movie_choice]
+        except ValueError:
+            print("Error: Invalid input. Movie number must be a number.")
+            return
+        except IndexError:
+            print(f"Error: Invalid movie number. Please choose between 1 and {len(cinema.movies)}.")
+            return
         
-        seats = [SEAT(f"S{i}") for i in range(1, num_seats + 1)]
+        showtime_time = input("Showtime time (HH:MM): ").strip()
+        if not showtime_time:
+            print("Error: Showtime cannot be empty.")
+            return
         
-        selected_movie.add_showtime(showtime_time, screen_number, seats)
-        print(f"Showtime {showtime_time} added to '{selected_movie.name}' successfully!")
+        if not re.match(r'^\d{1,2}:\d{2}$', showtime_time):
+            print("Error: Invalid time format. Use HH:MM (e.g., 19:00).")
+            return
+        
+        try:
+            screen_number_input = input("Screen number: ").strip()
+            screen_number = int(screen_number_input)
+            if screen_number <= 0:
+                print("Error: Screen number must be a positive number.")
+                return
+        except ValueError:
+            print("Error: Invalid screen number. Must be a number.")
+            return
+        
+        try:
+            num_seats_input = input("Number of seats for this showtime: ").strip()
+            num_seats = int(num_seats_input)
+            if num_seats <= 0:
+                print("Error: Number of seats must be a positive number.")
+                return
+            if num_seats > 100:
+                print("Warning: Creating a large number of seats. Maximum is 100.")
+                num_seats = 100
+        except ValueError:
+            print("Error: Invalid number of seats. Must be a number.")
+            return
+        
+        try:
+            seats = [SEAT(f"S{i}") for i in range(1, num_seats + 1)]
+            selected_movie.add_showtime(showtime_time, screen_number, seats)
+            print(f"Showtime {showtime_time} added to '{selected_movie.name}' successfully!")
+        except Exception as e:
+            print(f"Error adding showtime: {e}")
+            return
 
         print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
         print("Available channels: app, email, sms, push")
-        channels_input = input("Channels: ")
-        selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
-
+        channels_input = input("Channels: ").strip()
+        
+        if not channels_input:
+            print("No channels selected. Showtime added but no notifications sent.")
+            return
+        
+        selected_channels = [c.strip().lower() for c in channels_input.split(',') if c.strip()]
+        valid_channels = ['app', 'email', 'sms', 'push']
+        invalid_channels = [ch for ch in selected_channels if ch not in valid_channels]
+        
+        if invalid_channels:
+            print(f"Warning: Invalid channels ignored: {', '.join(invalid_channels)}")
+            selected_channels = [ch for ch in selected_channels if ch in valid_channels]
+        
         if not selected_channels:
-            print("No channels selected for new showtime notification.")
+            print("No valid channels selected. Showtime added but no notifications sent.")
             return
 
         targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
-        event_bus.publish(NEW_SHOWTIME, {
-            "movie_name": selected_movie.name,
-            "time": showtime_time,
-            "targets": targets,
-            "channels": selected_channels
-        })
-        print(f"New showtime notification sent via channels: {', '.join(selected_channels)}.")
-    except (ValueError, IndexError):
-        print("Invalid option.")
+        
+        try:
+            event_bus.publish(NEW_SHOWTIME, {
+                "movie_name": selected_movie.name,
+                "time": showtime_time,
+                "targets": targets,
+                "channels": selected_channels
+            })
+            print(f"New showtime notification sent via channels: {', '.join(selected_channels)}.")
+        except NotificationDeliveryException as e:
+            print(f"Warning: Notification delivery issue - {e}")
+        except Exception as e:
+            print(f"Warning: Failed to send notifications - {e}")
+            
+    except KeyboardInterrupt:
+        print("\nOperation canceled by user.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
 
 def create_coupon_admin():
-    if "manage_coupons" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "manage_coupons" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "manage_coupons"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
 
     print("\n--- CREATE NEW COUPON ---")
@@ -404,34 +609,49 @@ def create_coupon_admin():
         
         kwargs = {}
         min_purchase = float(input("Minimum purchase amount (0 for none): "))
-        if min_purchase > 0: kwargs['min_purchase'] = min_purchase
+        if min_purchase > 0: 
+            kwargs['min_purchase'] = min_purchase
             
         max_uses = int(input("Maximum uses (0 for unlimited): "))
-        if max_uses > 0: kwargs['max_uses'] = max_uses
+        if max_uses > 0: 
+            kwargs['max_uses'] = max_uses
             
         valid_until_str = input("Valid until (YYYY-MM-DD HH:MM) or leave blank: ")
-        if valid_until_str: kwargs['valid_until'] = datetime.strptime(valid_until_str, '%Y-%m-%d %H:%M')
+        if valid_until_str: 
+            kwargs['valid_until'] = datetime.strptime(valid_until_str, '%Y-%m-%d %H:%M')
             
         user_type = input("Applicable user type (student/regular) or leave blank: ")
-        if user_type: kwargs['user_type'] = user_type
+        if user_type: 
+            kwargs['user_type'] = user_type
 
         new_coupon = Coupon(code, coupon_type, value, description, **kwargs)
         promotion_manager.add_coupon(new_coupon)
         print(f"Coupon '{code}' created successfully!")
 
         targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
-        event_bus.publish(DISCOUNT_COUPON, {
-            "coupon_code": new_coupon.code,
-            "description": new_coupon.description,
-            "targets": targets
-        })
+        
+        try:
+            event_bus.publish(DISCOUNT_COUPON, {
+                "coupon_code": new_coupon.code,
+                "description": new_coupon.description,
+                "targets": targets
+            })
+        except NotificationDeliveryException as e:
+            print(f"Warning: {e}")
 
-    except ValueError:
+    except (ValueError, TypeError):
         print("Invalid input. Please check the format of your entries.")
 
+
 def view_reports_admin():
-    if "view_reports" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "view_reports" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "view_reports"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
     
     print("\n--- System Reports ---")
@@ -452,37 +672,73 @@ def view_reports_admin():
             print(f"Average ticket price: R$ {avg_price:.2f}")
             print("-" * 30)
 
+
 def send_custom_notification_admin():
     if "send_notifications" not in state.usuario_logado.permissions:
         print("Access denied.")
         return
 
     print("\n--- SEND CUSTOM NOTIFICATION ---")
-    message = input("Enter the notification message to send to all users: ")
-    if not message:
-        print("Message cannot be empty.")
-        return
+    
+    try:
+        message = input("Enter the notification message to send to all users: ").strip()
+        if not message:
+            print("Error: Message cannot be empty.")
+            return
 
-    print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
-    print("Available channels: app, email, sms, push")
-    channels_input = input("Channels: ")
-    selected_channels = [c.strip() for c in channels_input.split(',') if c.strip()]
+        print("\nSelect notification channels (comma-separated, e.g., app,email,sms,push):")
+        print("Available channels: app, email, sms, push")
+        channels_input = input("Channels: ").strip()
+        
+        if not channels_input:
+            print("Error: No channels selected. Notification will not be sent.")
+            return
+        
+        selected_channels = [c.strip().lower() for c in channels_input.split(',') if c.strip()]
+        valid_channels = ['app', 'email', 'sms', 'push']
+        invalid_channels = [ch for ch in selected_channels if ch not in valid_channels]
+        
+        if invalid_channels:
+            print(f"Warning: Invalid channels ignored: {', '.join(invalid_channels)}")
+            selected_channels = [ch for ch in selected_channels if ch in valid_channels]
+        
+        if not selected_channels:
+            print("Error: No valid channels selected. Notification will not be sent.")
+            return
 
-    if not selected_channels:
-        print("No channels selected. Notification will not be sent.")
-        return
+        targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
+        
+        if not targets:
+            print("Warning: No users to send notifications to.")
+            return
+        
+        try:
+            event_bus.publish(CUSTOM_NOTIFICATION, {
+                "message": message,
+                "targets": targets,
+                "channels": selected_channels
+            })
+            print(f"Custom notifications sent to {len(targets)} users via channels: {', '.join(selected_channels)}.")
+        except NotificationDeliveryException as e:
+            print(f"Warning: Notification delivery issue - {e}")
+        except Exception as e:
+            print(f"Warning: Failed to send notifications - {e}")
+            
+    except KeyboardInterrupt:
+        print("\nOperation canceled by user.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
 
-    targets = [u for u in state.usuarios_registrados.values() if u.user_type != USER_ADMIN]
-    event_bus.publish(CUSTOM_NOTIFICATION, {
-        "message": message,
-        "targets": targets,
-        "channels": selected_channels
-    })
-    print(f"Custom notifications sent to all users via channels: {', '.join(selected_channels)}.")
 
 def view_notification_statistics_admin():
-    if "view_reports" not in state.usuario_logado.permissions:
-        print("Access denied.")
+    try:
+        if "view_reports" not in state.usuario_logado.permissions:
+            raise UnauthorizedAccessException(
+                state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+                "view_reports"
+            )
+    except UnauthorizedAccessException as e:
+        print(f"Access denied: {e}")
         return
     print("\n" + "=" * 60)
     print(" NOTIFICATION CHANNELS STATISTICS")
@@ -524,6 +780,7 @@ def view_notification_statistics_admin():
     print("=" * 60)
     input("\nPress ENTER to go back...")
 
+
 def login():
     resposta = input("\nAre you already registered? \n[1] Yes\n[2] No\n ")
     
@@ -534,15 +791,34 @@ def login():
     else:
         print("Invalid option.")
 
+
 def processar_login():
-    login_user = input("Login: ")
-    password_user = input("Password: ")
-    
-    if login_user in state.usuarios_registrados and state.usuarios_registrados[login_user].password == password_user:
+    try:
+        login_user = input("Login: ").strip()
+        password_user = input("Password: ").strip()
+        
+        if not login_user or not password_user:
+            print("Error: Login and password cannot be empty.")
+            return
+        
+        if login_user not in state.usuarios_registrados:
+            raise UserNotFoundException(login_user)
+        
+        if state.usuarios_registrados[login_user].password != password_user:
+            raise InvalidCredentialsException(login_user)
+        
         state.usuario_logado = state.usuarios_registrados[login_user]
         print(f"Login successful! Welcome, {state.usuario_logado.name}.")
-    else:
-        print("Incorrect login or password.")
+        
+    except UserNotFoundException as e:
+        print(f"Error: {e}")
+    except InvalidCredentialsException as e:
+        print(f"Error: {e}")
+    except KeyboardInterrupt:
+        print("\nLogin canceled.")
+    except Exception as e:
+        print(f"Unexpected error during login: {e}")
+
 
 def registrar():
     name = input("Name: ")
@@ -550,6 +826,7 @@ def registrar():
     email = input("Email: ")
     password_user = input("Password: ")
     phone = input("Phone (optional, format: (82) 99900-0030 or leave blank): ").strip()
+    cpf = input("CPF (optional, format: 123.456.789-01 or leave blank): ").strip()
     
     if login_user in state.usuarios_registrados:
         print("This login already exists. Please try another one.")
@@ -557,17 +834,32 @@ def registrar():
     
     try:
         phone_value = phone if phone else None
-        new_user = USER(name, login_user, password_user, email, phone_value)
+        cpf_value = cpf if cpf else None
+        
+        new_user = USER(name, login_user, password_user, email, phone_value, cpf_value)
 
         if phone_value:
             new_user.device_token = f"device_{uuid.uuid4().hex[:16]}"
         
         state.usuarios_registrados[login_user] = new_user
         print("User successfully registered!")
+        
+        if cpf_value:
+            print(f"CPF registered: {new_user.cpf_formatted}")
         if phone_value:
             print(f"SMS and Push notifications enabled for {phone_value}")
-    except Exception as e:
+            
+    except InvalidEmailException as e:
         print(f"Registration failed: {e}")
+    except InvalidPhoneException as e:
+        print(f"Registration failed: {e}")
+    except InvalidCPFException as e:
+        print(f"Registration failed: {e}")
+    except InvalidPasswordException as e:
+        print(f"Registration failed: {e}")
+    except (ValueError, TypeError) as e:
+        print(f"Registration failed: Invalid data format - {e}")
+
 
 def ver_cinemas():
     print("\n--- Choose a Cinema ---")
@@ -584,9 +876,10 @@ def ver_cinemas():
             cinema_nome = cinema_keys[int(escolha) - 1]
             ver_filmes(state.cinemas[cinema_nome])
             break
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, TypeError):
             print("Invalid option.")
-            
+
+
 def ver_filmes(cinema_obj):
     print(f"\n--- Movies at {cinema_obj.name} ---")
     cinema_obj.list_movies()
@@ -609,38 +902,76 @@ def ver_filmes(cinema_obj):
                 break 
             else:
                 print("Invalid movie number. Please try again.")
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, TypeError):
             print("Invalid option. Please enter a number.")
-        
+
+
 def payment(valor):
     print(f"\n--- Payment Process of R${valor:.2f} ---")
     while True:
-        forma_de_pagamento = input("Choose a payment method: \n[1] Credit Card\n[2] Debit Card\n[3] Pix\n[4] Cancel\n") 
+        forma_de_pagamento = input("Choose a payment method: \n[1] Credit Card\n[2] Debit Card\n[3] Pix\n[4] Cancel\nOption: ").strip()
 
         if forma_de_pagamento == "1":
-            numero = input("Number of credit card(16 digits):").strip()
+            numero = input("Number of credit card (16 digits): ").strip()
             if len(numero) == 16 and numero.isdigit():
-                print(f"Payment made with Credit Card of R${valor:.2f}.")
-                return True
+                try:
+                    success, transaction_id = cinema_system.payments.process_payment("credit", valor, state.usuario_logado)
+                    if success:
+                        print(f"Payment made with Credit Card of R${valor:.2f}.")
+                        print(f"Transaction ID: {transaction_id}")
+                        return True
+                    else:
+                        print("Payment failed. Please try again.")
+                except (PaymentLimitExceededException, PaymentProcessingException, InvalidPaymentMethodException) as e:
+                    print(f"Payment error: {e}")
+                    retry = input("Try again? [Y/N]: ").strip().upper()
+                    if retry != "Y":
+                        return False
             else:
                 print("Invalid credit card number. Please try again.")
+                
         elif forma_de_pagamento == "2":
-            numero = input("Number of debit card(16 digits): ").strip()
+            numero = input("Number of debit card (16 digits): ").strip()
             if len(numero) == 16 and numero.isdigit():
-                print(f"Payment made with Debit Card of R${valor:.2f}.")
-                return True
+                try:
+                    success, transaction_id = cinema_system.payments.process_payment("debit", valor, state.usuario_logado)
+                    if success:
+                        print(f"Payment made with Debit Card of R${valor:.2f}.")
+                        print(f"Transaction ID: {transaction_id}")
+                        return True
+                    else:
+                        print("Payment failed. Please try again.")
+                except (PaymentLimitExceededException, PaymentProcessingException, InvalidPaymentMethodException) as e:
+                    print(f"Payment error: {e}")
+                    retry = input("Try again? [Y/N]: ").strip().upper()
+                    if retry != "Y":
+                        return False
             else:
                 print("Invalid debit card number. Please try again.")
+                
         elif forma_de_pagamento == "3":
             print("Pix Key: cinemaenterprises.com")
             print(f"Value: R${valor:.2f}")
-            print(f"Payment made with Pix of R${valor:.2f} Successfully completed.")
-            return True
+            try:
+                success, transaction_id = cinema_system.payments.process_payment("pix", valor, state.usuario_logado)
+                if success:
+                    print(f"Payment made with Pix of R${valor:.2f} Successfully completed.")
+                    print(f"Transaction ID: {transaction_id}")
+                    return True
+                else:
+                    print("Payment failed. Please try again.")
+            except (PaymentLimitExceededException, PaymentProcessingException, InvalidPaymentMethodException) as e:
+                print(f"Payment error: {e}")
+                retry = input("Try again? [Y/N]: ").strip().upper()
+                if retry != "Y":
+                    return False
+                    
         elif forma_de_pagamento == "4":
             print("Payment canceled.")
             return False
         else:
             print("Invalid option. Please try again.")
+
 
 def handle_combo_addition(builder):
     print("\n--- Combo Options ---")
@@ -651,7 +982,6 @@ def handle_combo_addition(builder):
     combo_option = input("Select an option: ").strip()
 
     if combo_option == "1":
-        from builders import ComboDirector
         director = ComboDirector()
         director.builder = builder
         
@@ -694,7 +1024,10 @@ def handle_combo_addition(builder):
         apply_coupon = input("\nDo you have a coupon? \n[1] Yes\n[2] No\n ").strip()
         if apply_coupon == "1":
             coupon_code = input("Enter coupon code: ").strip()
-            builder.apply_coupon(coupon_code)
+            try:
+                builder.apply_coupon(coupon_code)
+            except (InvalidCouponException, CouponExpiredException, CouponUsageLimitException, MinimumPurchaseException) as e:
+                print(f"Coupon error: {e}")
         
         return True
     
@@ -775,8 +1108,12 @@ def handle_combo_addition(builder):
                 while True:
                     coupon_code = input("Enter coupon code: ").strip()
                     if coupon_code:
-                        builder.apply_coupon(coupon_code=coupon_code)
-                        break
+                        try:
+                            builder.apply_coupon(coupon_code=coupon_code)
+                            break
+                        except (InvalidCouponException, CouponExpiredException, CouponUsageLimitException, MinimumPurchaseException) as e:
+                            print(f"Coupon error: {e}")
+                            break
                     else:
                         print("Invalid coupon code. Please enter a valid code.")
             elif extra_choice == "9":
@@ -794,7 +1131,7 @@ def handle_combo_addition(builder):
                         builder.remove_extra(remove_choice)
                     else:
                         print("Invalid number.")
-                except ValueError:
+                except (ValueError, TypeError):
                     print("Invalid input. Please enter a number.")
             elif extra_choice == "11":
                 if not builder._extras:
@@ -834,7 +1171,7 @@ def handle_combo_addition(builder):
                                 builder._extras[idx] = decorated_product
                                 builder._total_price += decorated_product.price
                                 print(f"Added {extra_item} to {product.name}!")
-                            except ValueError:
+                            except (ValueError, TypeError):
                                 print("Invalid price. Decoration canceled.")
                                 
                         elif dec_choice == "3":
@@ -851,7 +1188,7 @@ def handle_combo_addition(builder):
                             print("Invalid option.")
                     else:
                         print("Invalid selection.")
-                except ValueError:
+                except (ValueError, TypeError):
                     print("Please enter a valid number.")
             elif extra_choice == "0":
                 print("Combo addition canceled.")
@@ -864,49 +1201,67 @@ def handle_combo_addition(builder):
         apply_coupon = input("\nDo you have a coupon? \n[1] Yes\n[2] No\n ").strip()
         if apply_coupon == "1":
             coupon_code = input("Enter coupon code: ").strip()
-            builder.apply_coupon(coupon_code)
+            try:
+                builder.apply_coupon(coupon_code)
+            except (InvalidCouponException, CouponExpiredException, CouponUsageLimitException, MinimumPurchaseException) as e:
+                print(f"Coupon error: {e}")
         return True
     
     else:
         print("Invalid option.")
         return False
 
+
 def finalize_purchase(combo, movie, showtime, seat):
-    
     print(f"\nConfirming seat {seat.row_and_number} (current: {seat.get_status()})...")
-    if seat.confirm():
-        print(f"Seat {seat.row_and_number} is now {seat.get_status()}.")
-    else:
-        print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
+    
+    try:
+        if seat.confirm():
+            print(f"Seat {seat.row_and_number} is now {seat.get_status()}.")
+        else:
+            print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
+            return False
+    except SeatNotAvailableException as e:
+        print(f"Error confirming seat: {e}")
+        return False
 
-    combo.ticket.extras = combo.extras
-    combo.ticket.purchase_product(state.usuario_logado)
-    for extra in combo.extras:
-        if hasattr(extra, 'purchase_product'):
-            extra.purchase_product(state.usuario_logado)
+    try:
+        combo.ticket.extras = combo.extras
+        
+        combo.ticket.purchase_product(state.usuario_logado)
+        
+        for extra in combo.extras:
+            if hasattr(extra, 'purchase_product'):
+                extra.purchase_product(state.usuario_logado)
 
-    state.usuario_logado.add_booking(combo.ticket)
-    movie.total_tickets_sold += 1
-    movie.total_revenue += combo.total_price
+        state.usuario_logado.add_booking(combo.ticket)
+        
+        movie.total_tickets_sold += 1
+        movie.total_revenue += combo.total_price
 
-    event_bus.publish(PAYMENT_SUCCESS, {
-        "user": state.usuario_logado,
-        "amount": combo.total_price,
-        "movie": movie.name,
-        "time": showtime.time,
-        "seat": seat.row_and_number
-    })
+        event_bus.publish(PAYMENT_SUCCESS, {
+            "user": state.usuario_logado,
+            "amount": combo.total_price,
+            "movie": movie.name,
+            "time": showtime.time,
+            "seat": seat.row_and_number
+        })
 
-    event_bus.publish(BOOKING_CONFIRMED, {
-        "user": state.usuario_logado,
-        "movie": movie.name,
-        "time": showtime.time,
-        "seat": seat.row_and_number
-    })
+        event_bus.publish(BOOKING_CONFIRMED, {
+            "user": state.usuario_logado,
+            "movie": movie.name,
+            "time": showtime.time,
+            "seat": seat.row_and_number
+        })
 
-    print("\nPurchase completed successfully!")
-    combo.ticket.generate_qr_code()
-    return True
+        print("\nPurchase completed successfully!")
+        combo.ticket.generate_qr_code()
+        return True
+        
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Error finalizing purchase: {e}")
+        return False
+
 
 def comprar_ingresso(movie):
     print(f"\n--- Buy Ticket for '{movie.name}' ---")
@@ -937,12 +1292,16 @@ def comprar_ingresso(movie):
             print("Seat not available. Showing history:")
             assento_selecionado.get_history()
             continue
-            
-        if assento_selecionado.temp_reserve(state.usuario_logado, minutes=10):
-            print(f"Seat {assento_selecionado.row_and_number} temporarily reserved until {assento_selecionado.reservation_expiry}.")
-            break
-        else:
-            print("Could not reserve seat. Please try another one.")
+        
+        try:
+            if assento_selecionado.temp_reserve(state.usuario_logado, minutes=10):
+                print(f"Seat {assento_selecionado.row_and_number} temporarily reserved until {assento_selecionado.reservation_expiry}.")
+                break
+            else:
+                print("Could not reserve seat. Please try another one.")
+        except SeatAlreadyReservedException as e:
+            print(f"Reservation error: {e}")
+            continue
 
     while True:
         tipo_ingresso_input = input("Enter the ticket type (Standard, Student, VIP): ").strip().lower()
@@ -959,8 +1318,16 @@ def comprar_ingresso(movie):
         assento_selecionado.release(state.usuario_logado)
         return
     
-    if assento_selecionado.check_expiry():
-        print("Your temporary reservation expired. Seat released.")
+    try:
+        if assento_selecionado.check_expiry():
+            print("Your temporary reservation expired. Seat released.")
+            return
+    except ReservationExpiredException as e:
+        try:
+            assento_selecionado.release(state.usuario_logado)
+        except Exception:
+            pass
+        print(f"Reservation expired: {e}. Seat released.")
         return
 
     try:
@@ -974,30 +1341,46 @@ def comprar_ingresso(movie):
             for extra in combo.extras:
                 print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
         print(f" Total: R$ {combo.total_price:.2f}")
-    except Exception as e:
+    except (BookingException, PaymentException, CouponException) as e:
         print(f"Error building combo: {e}")
         assento_selecionado.release(state.usuario_logado)
         return
 
     pagar = input(f"Proceed with payment of R$ {combo.total_price:.2f}? \n[1] Yes\n[2] No\n ").strip()
     if pagar == "1":
-        if assento_selecionado.check_expiry():
-            print("Your temporary reservation has expired. Please start over.")
+        try:
+            if assento_selecionado.check_expiry():
+                print("Your temporary reservation has expired. Please start over.")
+                return
+        except ReservationExpiredException as e:
+            try:
+                assento_selecionado.release(state.usuario_logado)
+            except Exception:
+                pass
+            print(f"Reservation expired: {e}. Please start over.")
             return
+            
         if payment(combo.total_price):
             cmd = PurchaseComboCommand(combo, movie, showtime_selecionado, assento_selecionado, state.usuario_logado, finalize_purchase)
-            cinema_system.invoker.execute_command(cmd)
-            if not getattr(cmd, "executed", False):
-                print("Purchase failed. Seat will be released.")
-                assento_selecionado.release(state.usuario_logado)
-            else:
-                pass
+            try:
+                cinema_system.invoker.execute_command(cmd)
+                if not getattr(cmd, "executed", False):
+                    print("Purchase failed. Seat will be released.")
+                    assento_selecionado.release(state.usuario_logado)
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"Purchase error: {e}. Seat will be released.")
+                try:
+                    assento_selecionado.release(state.usuario_logado)
+                    print(f"Seat {assento_selecionado.row_and_number} released.")
+                except (BookingException, SeatNotAvailableException) as e2:
+                    print(f"Warning: Could not release seat: {e2}")
         else:
             print("Payment failed. Releasing seat.")
             assento_selecionado.release(state.usuario_logado)
     else:
         print("Purchase canceled. Releasing seat.")
         assento_selecionado.release(state.usuario_logado)
+
 
 def avaliar_filme():
     print("\n--- Choose a Cinema to Rate a Movie ---")
@@ -1021,17 +1404,18 @@ def avaliar_filme():
             escolha_filme = input("Enter the number of the movie you want to rate: ")
             movie_to_review = cinema_obj.movies[int(escolha_filme) - 1]
 
-            rating = int(input("Your rating (1 a 5): "))
+            rating = int(input("Your rating (1 to 5): "))
             if rating < 1 or rating > 5:
-                raise ValueError
+                raise ValueError("Rating must be between 1 and 5")
             comment = input("Your comment: ")
             
             movie_to_review.add_review(rating, comment)
             print("Review successfully submitted!")
             return
 
-        except (ValueError, IndexError):
-            print("Invalid option. Please try again.")
+        except (ValueError, IndexError, TypeError) as e:
+            print(f"Invalid option: {e}. Please try again.")
+
 
 def cancelar_compra():
     active_bookings = [t for t in state.usuario_logado.booking_history if not getattr(t, "cancelled", False)]
@@ -1047,7 +1431,7 @@ def cancelar_compra():
             movie_name = getattr(getattr(getattr(ticket, "showtime", None), "movie", None), "name", "N/A")
             seat = getattr(getattr(ticket, "seat", None), "row_and_number", "N/A")
             print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()} - {movie_name} (Seat {seat})")
-        except Exception:
+        except (AttributeError, TypeError):
             print(f"[{i}] {getattr(ticket, 'name', 'TICKET').upper()}")
     
     escolha = input("Enter the number of the booking you want to cancel (or '0' to go back): ").strip()
@@ -1056,12 +1440,13 @@ def cancelar_compra():
     
     try:
         index = int(escolha) - 1
-    except Exception:
-        print("Invalid option. Please try again.")
+        if not (0 <= index < len(active_bookings)):
+            raise IndexError("Invalid booking number.")
+    except (ValueError, TypeError):
+        print("Invalid input. Please enter a number.")
         return False
-
-    if not (0 <= index < len(active_bookings)):
-        print("Invalid number.")
+    except IndexError as e:
+        print(f"Error: {e}")
         return False
 
     ticket = active_bookings[index]
@@ -1071,61 +1456,52 @@ def cancelar_compra():
 
     try:
         total_refund = float(getattr(ticket, "price", 0.0) or 0.0)
-    except Exception:
+    except (ValueError, TypeError):
         total_refund = 0.0
+        
     for extra in getattr(ticket, "extras", []) or []:
         try:
             total_refund += float(getattr(extra, "price", 0.0) or 0.0)
-        except Exception:
+        except (ValueError, TypeError):
             pass
 
     print(f"Canceling ticket: {getattr(ticket, 'name', 'TICKET')} - R$ {float(getattr(ticket, 'price', 0.0) or 0.0):.2f}")
 
     for extra in getattr(ticket, "extras", []) or []:
-        try:
-             cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
-        except Exception:
+        if hasattr(extra, "cancel_purchase"):
             try:
-                if hasattr(extra, "cancel_purchase"):
-                    extra.cancel_purchase(state.usuario_logado)
-            except Exception:
-                pass
+                cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"Warning: Failed to cancel extra '{extra.name}': {e}")
 
-    status = seat.get_status() if seat else "Unknown"
-    seat_id = getattr(seat, "row_and_number", "N/A")
-    print(f"Seat {seat_id} current status: {status}")
+    if seat:
+        seat_id = getattr(seat, "row_and_number", "N/A")
+        print(f"Seat {seat_id} current status: {seat.get_status()}")
+    else:
+        seat_id = "N/A"
 
-    cmd_ticket = None
-    try:
-        cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
-        cinema_system.invoker.execute_command(cmd_ticket)
-    except Exception:
-        pass
+    if hasattr(ticket, "cancel_purchase"):
+        try:
+            cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
+            cinema_system.invoker.execute_command(cmd_ticket)
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"Warning: Failed to cancel ticket: {e}")
 
-    try:
-        if seat:
+    if seat and hasattr(seat, "release"):
+        try:
             seat.release(state.usuario_logado)
-    except Exception:
-        pass
+        except (BookingException, SeatNotAvailableException) as e:
+            print(f"Warning: Could not release seat: {e}")
 
     if movie:
         try:
             movie.total_tickets_sold = max(0, getattr(movie, "total_tickets_sold", 0) - 1)
-            movie.total_revenue = max(0.0, getattr(movie, "total_revenue", 0.0) - float(total_refund or 0.0))
-        except Exception:
+            movie.total_revenue = max(0.0, getattr(movie, "total_revenue", 0.0) - total_refund)
+        except (ValueError, TypeError):
             pass
 
-    try:
+    if hasattr(state.usuario_logado, "cancel_booking"):
         state.usuario_logado.cancel_booking(ticket)
-    except Exception:
-        pass
-
-    try:
-        if not getattr(cmd_ticket, "executed", False):
-            if hasattr(ticket, "cancel_purchase"):
-                ticket.cancel_purchase(state.usuario_logado)
-    except Exception:
-        pass
 
     try:
         event_bus.publish(BOOKING_CANCELLED, {
@@ -1140,8 +1516,8 @@ def cancelar_compra():
             "amount": total_refund,
             "seat": seat_id
         })
-    except Exception:
-        pass
+    except NotificationDeliveryException as e:
+        print(f"Warning: Notification failed: {e}")
 
     print(f"\nBooking and associated extras cancelled successfully! R$ {total_refund:.2f} will be refunded.")
     return True

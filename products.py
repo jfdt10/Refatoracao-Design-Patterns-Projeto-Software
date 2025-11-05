@@ -88,7 +88,6 @@ class POPCORN(FOOD):
         return self.price
 
     def cancel_purchase(self, user=None):
-        # No side-effect prints here; state handling elsewhere.
         return True
 
     def promotion(self, coupon=None):
@@ -107,14 +106,14 @@ class TICKET(SERVICE):
         self.seat = seat
         self.showtime = showtime
         self.extras = []
+        self.user = None
 
     def purchase_product(self, user=None):
-        # Reserve the seat temporarily; confirmation handled by UI/finalize logic.
-        self.seat.temp_reserve(user)
+        self.user = user
         return True
 
     def cancel_purchase(self, user=None):
-        self.seat.release(user)
+        self.user = None
         return True
 
     def generate_service_confirmation(self):
@@ -146,7 +145,6 @@ class TICKET(SERVICE):
         """
         qr = qrcode.QRCode(box_size=2)
         qr.add_data(data)
-        # Keep QR printing as user-facing confirmation
         print("\n📲 Mobile Ticket With QR Code:")
         print("-" * 40)
         print(data.strip())

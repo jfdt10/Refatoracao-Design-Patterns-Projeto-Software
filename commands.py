@@ -1,4 +1,5 @@
-from abc import ABC, ABCMeta,abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
+from exceptions import BookingException, PaymentException, CouponException
 
 class Command(metaclass=ABCMeta):
     @abstractmethod
@@ -9,6 +10,7 @@ class Command(metaclass=ABCMeta):
     def undo(self):
         pass
 
+
 class CommandInvoker:
     def __init__(self):
         self._history = []
@@ -16,10 +18,10 @@ class CommandInvoker:
     def execute_command(self, command: Command):
         try:
             command.execute()
-            if getattr(command, "executed", False) or getattr(command, "_executed", False):
+            if getattr(command, "executed", False):
                 self._history.append(command)
-        except Exception as e:
-            print(f"Error executing command: {e}")
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during execution: {e}")
 
     def undo_last(self):
         if not self._history:
@@ -28,8 +30,8 @@ class CommandInvoker:
         command = self._history.pop()
         try:
             command.undo()
-        except Exception as e:
-            print(f"Error undoing command: {e}")
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during undo: {e}")
 
     def clear_history(self):
         self._history.clear()
@@ -37,6 +39,7 @@ class CommandInvoker:
 
     def get_history(self):
         return list(self._history)
+
 
 class PurchaseProductCommand(Command):
     def __init__(self, product, user=None):
@@ -48,29 +51,34 @@ class PurchaseProductCommand(Command):
         if self.executed:
             print("PurchaseProductCommand: already executed.")
             return
+            
         if not hasattr(self.product, "purchase_product"):
             print("PurchaseProductCommand: product has no purchase_product method.")
             self.executed = False
             return
+        
         try:
             self.product.purchase_product(self.user)
             self.executed = True
-        except Exception as e:
+        except (BookingException, PaymentException, CouponException) as e:
             print(f"PurchaseProductCommand execute error: {e}")
             self.executed = False
+            raise
 
     def undo(self):
         if not self.executed:
             print("PurchaseProductCommand: cannot undo, not executed.")
             return
+            
         if not hasattr(self.product, "cancel_purchase"):
             print("PurchaseProductCommand: product has no cancel_purchase method.")
             self.executed = False
             return
+        
         try:
             self.product.cancel_purchase(self.user)
             self.executed = False
-        except Exception as e:
+        except (BookingException, PaymentException, CouponException) as e:
             print(f"PurchaseProductCommand undo error: {e}")
 
 
@@ -84,29 +92,34 @@ class CancelProductCommand(Command):
         if self.executed:
             print("CancelProductCommand: already executed.")
             return
+            
         if not hasattr(self.product, "cancel_purchase"):
             print("CancelProductCommand: product has no cancel_purchase method.")
             self.executed = False
             return
+        
         try:
             self.product.cancel_purchase(self.user)
             self.executed = True
-        except Exception as e:
+        except (BookingException, PaymentException, CouponException) as e:
             print(f"CancelProductCommand execute error: {e}")
             self.executed = False
+            raise
 
     def undo(self):
         if not self.executed:
             print("CancelProductCommand: cannot undo, not executed.")
             return
+            
         if not hasattr(self.product, "purchase_product"):
             print("CancelProductCommand: product has no purchase_product method.")
             self.executed = False
             return
+        
         try:
             self.product.purchase_product(self.user)
             self.executed = False
-        except Exception as e:
+        except (BookingException, PaymentException, CouponException) as e:
             print(f"CancelProductCommand undo error: {e}")
 
 
@@ -127,19 +140,29 @@ class PurchaseComboCommand(Command):
             return
 
         extras = getattr(self.combo, "extras", []) or []
+        
         try:
             for extra in extras:
                 cmd = PurchaseProductCommand(extra, self.user)
-                cmd.execute()
-                if not getattr(cmd, "executed", False):
-                    print("PurchaseComboCommand: failed to purchase an extra. Rolling back extras...")
+                try:
+                    cmd.execute()
+                    if not getattr(cmd, "executed", False):
+                        print("PurchaseComboCommand: failed to purchase an extra. Rolling back extras...")
+                        for done in reversed(self._sub_commands):
+                            try:
+                                done.undo()
+                            except Exception:
+                                pass
+                        return
+                    self._sub_commands.append(cmd)
+                except (BookingException, PaymentException, CouponException) as e:
+                    print(f"PurchaseComboCommand: failed to purchase extra: {e}. Rolling back...")
                     for done in reversed(self._sub_commands):
                         try:
                             done.undo()
                         except Exception:
                             pass
-                    return
-                self._sub_commands.append(cmd)
+                    raise
 
             try:
                 result = None
@@ -150,19 +173,21 @@ class PurchaseComboCommand(Command):
                         result = self.finalize_fn(self.combo, self.movie, self.showtime)
                     except Exception:
                         raise
+                
                 if result is False:
-                    raise RuntimeError("finalize function indicated failure")
-            except Exception as e:
+                    raise BookingException("finalize function indicated failure")
+            except (BookingException, PaymentException, CouponException) as e:
                 print(f"PurchaseComboCommand: finalize failed: {e}. Rolling back extras...")
                 for done in reversed(self._sub_commands):
                     try:
                         done.undo()
                     except Exception:
                         pass
-                return
+                raise
 
             self.executed = True
-        except Exception as e:
+            
+        except (BookingException, PaymentException, CouponException) as e:
             print(f"PurchaseComboCommand execute error: {e}")
             for done in reversed(self._sub_commands):
                 try:
@@ -170,11 +195,13 @@ class PurchaseComboCommand(Command):
                 except Exception:
                     pass
             self.executed = False
+            raise
 
     def undo(self):
         if not self.executed:
             print("PurchaseComboCommand: cannot undo, not executed.")
             return
+        
         try:
             for cmd in reversed(self._sub_commands):
                 try:
@@ -185,7 +212,7 @@ class PurchaseComboCommand(Command):
             try:
                 ticket = getattr(self.combo, "ticket", None)
                 if ticket and hasattr(self.user, "cancel_booking"):
-                   self.user.cancel_booking(ticket)
+                    self.user.cancel_booking(ticket)
             except Exception:
                 pass
 
@@ -211,5 +238,6 @@ class PurchaseComboCommand(Command):
 
             self.executed = False
             print("PurchaseComboCommand: combo purchase undone successfully.")
+            
         except Exception as e:
             print(f"PurchaseComboCommand undo error: {e}")

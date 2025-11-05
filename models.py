@@ -2,13 +2,24 @@ import uuid
 from datetime import datetime
 from services import notification_service
 from states import AvailableState
-from utils import USER_ADMIN, USER_REGULAR
+from utils import USER_ADMIN, USER_REGULAR, MetaSingleton
 import re
+from exceptions import (
+    InvalidEmailException,
+    InvalidPhoneException,
+    InvalidCPFException,
+    InvalidPasswordException,
+    validate_email,
+    validate_phone,
+    validate_cpf
+)
 
 class USER:
-    def __init__(self, name, login, password, email=None, phone=None):  
+    def __init__(self, name, login, password, email=None, phone=None, cpf=None):  
         self.name = name
         self.login = login
+        self._cpf = None
+        self.cpf = cpf 
         self.email = email if email else f"{login}@example.com" 
         self.password = password
         self.phone = phone
@@ -19,8 +30,33 @@ class USER:
         self.created_at = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     @property
+    def cpf(self):
+        return self._cpf
+    
+    @property
+    def cpf_formatted(self): 
+        if not self._cpf:
+            return None
+        return f"{self._cpf[:3]}.{self._cpf[3:6]}.{self._cpf[6:9]}-{self._cpf[9:]}"
+
+    @cpf.setter
+    def cpf(self, new_cpf):
+        if new_cpf is None:
+            self._cpf = None
+            return
+        
+        if not isinstance(new_cpf, str):
+            raise TypeError("CPF must be a string.")
+        try:
+            validate_cpf(new_cpf)
+            self._cpf = re.sub(r'\D', '', new_cpf)
+        except InvalidCPFException:
+            raise
+
+    @property
     def password(self):
         return self.__password
+    
     @property
     def name(self):
         return self.__name
@@ -32,9 +68,17 @@ class USER:
     @property
     def email(self):
         return self.__email
+    
     @property
     def phone(self):
         return self.__phone
+    
+    @property
+    def phone_formatted(self):
+        if not self.__phone:
+            return None
+        return f"({self.__phone[:2]}) {self.__phone[2:7]}-{self.__phone[7:]}"
+    
     @property
     def device_token(self):
         return self.__device_token
@@ -45,16 +89,16 @@ class USER:
             self.__phone = None
             return
         if not isinstance(new_phone, str):
-            raise TypeError("Telefone deve ser uma string.")
+            raise TypeError("Phone must be a string.")
         if new_phone.strip().startswith("()"):
-            raise ValueError("Telefone inválido (DDD vazio).")
-        cleaned_phone = re.sub(r'\D', '', new_phone)
-        regex_br = r'^\d{10,11}$'
-
-        if re.match(regex_br, cleaned_phone):
+            raise InvalidPhoneException(new_phone, "Invalid phone (empty area code).")
+        
+        try:
+            validate_phone(new_phone)
+            cleaned_phone = re.sub(r'\D', '', new_phone)
             self.__phone = cleaned_phone
-        else:
-            raise ValueError(f"Número de telefone inválido: '{new_phone}'. Deve ter 10 ou 11 dígitos.")
+        except InvalidPhoneException:
+            raise
     
     @device_token.setter
     def device_token(self, new_token):
@@ -76,32 +120,31 @@ class USER:
 
     @email.setter
     def email(self, new_email):
-        if not isinstance(new_email, str) or "@" not in new_email or "." not in new_email.split("@")[-1]:
-            raise ValueError("The email must be a valid email address.")
-        else:
+        if not isinstance(new_email, str):
+            raise TypeError("Email must be a string.")
+        try:
+            validate_email(new_email)
             self.__email = new_email.strip()
+        except InvalidEmailException:
+            raise  
             
     @password.setter
     def password(self, new_password):
-        if not isinstance(new_password, str) or len(new_password) < 5:
-            raise ValueError("The password must be a string and have at least 5 characters.")
-        else:
-            self.__password = new_password
+        if not isinstance(new_password, str):
+            raise TypeError("Password must be a string.")
+        if len(new_password) < 5:
+            raise InvalidPasswordException("Password must have at least 5 characters.")
+        self.__password = new_password
     
     def add_booking(self, ticket):
         self.booking_history.append(ticket)
 
-
     def cancel_booking(self, ticket):
-        try:
-            if ticket in self.booking_history:
-                ticket.cancelled = True
-                ticket.cancelled_at = datetime.now()
-        except Exception:
-            pass
+        if ticket in self.booking_history:
+            ticket.cancelled = True
+            ticket.cancelled_at = datetime.now()
 
     def view_booking_history(self, include_cancelled=True):
-
         if not self.booking_history:
             print("No past bookings.")
             return
@@ -156,7 +199,7 @@ class USER:
                 print(f" Seat: {seat}")
             try:
                 print(f" Price: R$ {float(price):.2f}")
-            except Exception:
+            except (ValueError, TypeError):
                 print(f" Price: {price}")
 
             coupon = getattr(ticket, "last_coupon_code", None)
@@ -166,7 +209,7 @@ class USER:
                 if discount is not None:
                     try:
                         print(f" Discount: R$ {float(discount):.2f}")
-                    except Exception:
+                    except (ValueError, TypeError):
                         print(f" Discount: {discount}")
 
             extras = getattr(ticket, "extras", None)
@@ -179,23 +222,20 @@ class USER:
                     ex_discount = getattr(ex, "last_discount_amount", None)
                     try:
                         line = f"  - {ex_name} - R$ {float(ex_price):.2f}"
-                    except Exception:
+                    except (ValueError, TypeError):
                         line = f"  - {ex_name} - {ex_price}"
                     if ex_coupon or ex_discount is not None:
                         line += f" (Coupon: {ex_coupon or '-'}"
                         if ex_discount is not None:
                             try:
                                 line += f", Discount: R$ {float(ex_discount):.2f})"
-                            except Exception:
+                            except (ValueError, TypeError):
                                 line += f", Discount: {ex_discount})"
                         else:
                             line += ")"
                     print(line)
-        except Exception:
-            try:
-                print(f" Details: {ticket}")
-            except Exception:
-                print(" Details unavailable")
+        except AttributeError:
+            print(f" Details: {ticket}")
 
     def view_notifications(self, unread_only=False):
         notifications = notification_service.get_user_notifications(self.id, unread_only)
@@ -217,8 +257,8 @@ class USER:
 
 
 class ADMIN(USER):
-    def __init__(self, name, login, password, email=None, phone=None):
-        super().__init__(name, login, password, email, phone)
+    def __init__(self, name, login, password, email=None, phone=None, cpf=None):
+        super().__init__(name, login, password, email, phone, cpf)
         self.user_type = USER_ADMIN
         self.permissions = ["manage_movies", "manage_cinemas", "manage_coupons", "view_reports", "send_notifications"]
 
@@ -330,11 +370,14 @@ class MOVIE:
         total_rating = sum(review["rating"] for review in self.reviews)
         return total_rating / len(self.reviews)
 
-
-class CINEMA:
+class CINEMA(metaclass=MetaSingleton):
     def __init__(self, name):
+        if hasattr(self, '_initialized'):
+            return
+        
         self.name = name
         self.movies = []
+        self._initialized = True
     
     def add_movie(self, movie):
         self.movies.append(movie)

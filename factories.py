@@ -1,10 +1,6 @@
 from abc import ABC, abstractmethod
 from products import TICKET, POPCORN, CANDY, NACHOS, HOTDOG, SODA, JUICE, WATER
 
-
-
-
-
 #------Abstract Factory--------------
 class AbstractFactory(ABC):
     @abstractmethod

@@ -1,5 +1,7 @@
 # MovieTicketSystem
 
+**Status:** ✔️ **Projeto Finalizado — v1.0** (Concluído em 04/11/2025)
+
 **[Português](#português)** | **[English](#english)**
 
 ---
@@ -120,6 +122,7 @@ Refatoracao-Design-Patterns-Projeto-Software/
 ├── ui.py                       # Interface de linha de comando
 ├── models.py                   # Modelos de domínio (USER, CINEMA, MOVIE, SEAT)
 ├── products.py                 # Produtos (TICKET, POPCORN, DRINK, etc.)
+├── exceptions.py               # Hierarquia de exceções personalizadas (20+ tipos)
 │
 ├── Padrões Criacionais
 │   ├── factories.py            # Abstract Factory & Factory Method
@@ -189,13 +192,15 @@ python main.py
 
 ### Melhorias Futuras
 
-**Em Desenvolvimento:**
-- Tratamento robusto de exceções
+**✔️ Concluído (v1.0):**
+- Tratamento robusto de exceções (20+ exceções personalizadas, validações, handlers específicos)
 
-**Planejado:**
+**Planejado (v1.1+):**
 - API REST com Flask/FastAPI
 - Dashboard administrativo
 - Relatórios e analytics avançados
+- Integração com banco de dados real
+- Autenticação e segurança (JWT, hashing)
 
 ---
 
@@ -321,6 +326,7 @@ Refatoracao-Design-Patterns-Projeto-Software/
 ├── ui.py                       # Command-line interface
 ├── models.py                   # Domain models (USER, CINEMA, MOVIE, SEAT)
 ├── products.py                 # Products (TICKET, POPCORN, DRINK, etc.)
+├── exceptions.py               # Custom exception hierarchy (20+ types)
 │
 ├── Creational Patterns
 │   ├── factories.py            # Abstract Factory & Factory Method
@@ -390,13 +396,15 @@ python main.py
 
 ### Future Improvements
 
-**In Development:**
-- Robust exception handling 
+**✔️ Completed (v1.0):**
+- Robust exception handling (20+ custom exceptions, validations, specific handlers)
 
-**Planned:**
+**Planned (v1.1+):**
 - REST API with Flask/FastAPI
 - Administrative dashboard
 - Advanced reports and analytics
+- Real database integration
+- Authentication and security (JWT, hashing)
 
 ---
 

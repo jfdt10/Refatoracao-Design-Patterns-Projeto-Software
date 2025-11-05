@@ -14,7 +14,6 @@ class ProductDecorator(ABC):
     def name(self):
         return self._product.name
     
-    # Delegação de métodos
     def purchase_product(self, user=None):
         return self._product.purchase_product(user)
     
@@ -50,10 +49,10 @@ class SpecialPackagingDecorator(ProductDecorator):
     
     @property
     def name(self):
-        return f"{self._product.name} (Embalagem Especial)"
+        return f"{self._product.name} (Special Packaging)"
         
     def purchase_product(self, user=None):
-        print(f"Adicionando embalagem especial para {self._product.name}")
+        print(f"Adding special packaging for {self._product.name}")
         return self._product.purchase_product(user)
 
 class ExtraItemDecorator(ProductDecorator):
@@ -91,11 +90,11 @@ class GiftWrapDecorator(ProductDecorator):
     @property
     def name(self):
         if self._message:
-            return f"{self._product.name} (Embrulho para Presente: '{self._message}')"
-        return f"{self._product.name} (Embrulho para Presente)"
+            return f"{self._product.name} (Gift Wrap: '{self._message}')"
+        return f"{self._product.name} (Gift Wrap)"
         
     def purchase_product(self, user=None):
-        print(f"Embrulhando {self._product.name} para presente")
+        print(f"Wrapping {self._product.name} to gift")
         return self._product.purchase_product(user)
 
 # Função auxiliar para facilitar o uso dos decoradores

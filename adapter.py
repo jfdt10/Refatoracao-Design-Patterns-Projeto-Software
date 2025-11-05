@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from utils import MetaSingleton
 from datetime import datetime
 import uuid
 
@@ -18,10 +17,10 @@ class EmailService:
         self.password = "password123"  
     
     def send_email(self, to_email, subject, body, html=None):
-        print(f"\n[EMAIL SERVICE] Enviando email para {to_email}")
-        print(f"Assunto: {subject}")
-        print(f"Conteúdo: {body}")
-        print(f"De: {self.username}")
+        print(f"\n[EMAIL SERVICE] Sending email to {to_email}")
+        print(f"Subject: {subject}")
+        print(f"Body: {body}")
+        print(f"From: {self.username}")
         print("-" * 50)
         
         return {
@@ -38,9 +37,9 @@ class SMSService:
         self.api_url = "https://api.smsservice.example.com/send"
     
     def send_sms(self, phone_number, message):
-        print(f"\n[SMS SERVICE] Enviando SMS para {phone_number}")
-        print(f"Mensagem: {message}")
-        print(f"Remetente: {self.sender_id}")
+        print(f"\n[SMS SERVICE] Sending SMS to {phone_number}")
+        print(f"Message: {message}")
+        print(f"Sender: {self.sender_id}")
         print("-" * 50)
         
         return {
@@ -56,11 +55,11 @@ class PushNotificationService:
         self.api_url = "https://api.pushnotifications.example.com/send"
     
     def send_push(self, device_token, title, body, data=None):
-        print(f"\n[PUSH SERVICE] Enviando notificação push para dispositivo {device_token[:8]}...")
-        print(f"Título: {title}")
-        print(f"Mensagem: {body}")
+        print(f"\n[PUSH SERVICE] Sending push notification to device {device_token[:8]}...")
+        print(f"Title: {title}")
+        print(f"Message: {body}")
         if data:
-            print(f"Dados: {data}")
+            print(f"Data: {data}")
         print("-" * 50)
         
         return {
@@ -108,7 +107,7 @@ class SMSNotificationAdapter(NotificationChannel):
     
     def send(self, user, subject, message, data=None):
         if not hasattr(user, 'phone') or not user.phone:
-            print(f"Usuário {user.name} não possui número de telefone cadastrado.")
+            print(f"User {user.name} does not have a registered phone number.")
             return {"status": "error", "message": "No phone number available"}
         
         sms_text = f"{subject}: {message}"
@@ -140,7 +139,7 @@ class PushNotificationAdapter(NotificationChannel):
     
     def send(self, user, subject, message, data=None):
         if not hasattr(user, 'device_token') or not user.device_token:
-            print(f"Usuário {user.name} não possui token de dispositivo cadastrado.")
+            print(f"User {user.name} does not have a registered device token.")
             return {"status": "error", "message": "No device token available"}
         
         result = self.push_service.send_push(

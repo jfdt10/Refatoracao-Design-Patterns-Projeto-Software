@@ -13,7 +13,6 @@ PAYMENT_REFUNDED = "payment_refunded"
 BOOKING_CANCELLED = "booking_cancelled"
 CUSTOM_NOTIFICATION = "custom_notification"
 
-
 # --- Constantes de Cupom ---
 PERCENTAGE = "percentage"
 FIXED_AMOUNT = "fixed_amount"

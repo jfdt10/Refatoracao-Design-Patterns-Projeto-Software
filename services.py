@@ -2,6 +2,14 @@ import uuid
 from datetime import datetime, timedelta
 from utils import MetaSingleton, PERCENTAGE, FIXED_AMOUNT
 from adapter import EmailNotificationAdapter, SMSNotificationAdapter, PushNotificationAdapter
+from exceptions import (
+    InvalidCouponException,
+    CouponExpiredException,
+    CouponUsageLimitException,
+    MinimumPurchaseException,
+    NotificationDeliveryException,
+    InvalidNotificationChannelException
+)
 
 class MultiChannelNotificationService(metaclass=MetaSingleton):
     def __init__(self):
@@ -33,8 +41,15 @@ class MultiChannelNotificationService(metaclass=MetaSingleton):
             'channels_sent': []
         }
 
+        failed_channels = []
         for channel_name in channels:
-            if channel_name in self.channels and self.channels[channel_name]:
+            if channel_name not in self.channels:
+                raise InvalidNotificationChannelException(
+                    channel_name, 
+                    list(self.channels.keys())
+                )
+            
+            if self.channels[channel_name]:
                 try:
                     channel = self.channels[channel_name]
                     result = channel.send(user, notification_type, message, data)
@@ -43,12 +58,24 @@ class MultiChannelNotificationService(metaclass=MetaSingleton):
                         'status': result.get('status', 'unknown'),
                         'timestamp': datetime.now()
                     })
-                except Exception as e:
-                    print(f"Erro ao enviar notificação via {channel_name}: {e}")
+                except (AttributeError, KeyError, TypeError) as e:
+                    failed_channels.append(channel_name)
+                    notification['channels_sent'].append({
+                        'channel': channel_name,
+                        'status': 'failed',
+                        'error': str(e),
+                        'timestamp': datetime.now()
+                    })
+
+        if failed_channels and len(failed_channels) == len(channels):
+            raise NotificationDeliveryException(
+                ", ".join(failed_channels),
+                "Falha em todos os canais de notificação"
+            )
 
         self.notifications.append(notification)
         return notification['id']
-
+    
     def get_user_notifications(self, user_id, unread_only=False):
         user_notifications = [n for n in self.notifications if n['user_id'] == user_id]
         if unread_only:
@@ -109,28 +136,66 @@ class Coupon:
         self.is_active = True
         self.applicable_ticket_types = applicable_ticket_types or []
 
-    def is_valid(self):
+    def is_valid(self, raise_exception=False):
         if not self.is_active:
+            if raise_exception:
+                raise InvalidCouponException(self.code, "Cupom está inativo")
             return False
+        
         if self.valid_until and datetime.now() > self.valid_until:
+            if raise_exception:
+                raise CouponExpiredException(self.code, self.valid_until)
             return False
+        
         if self.max_uses and self.uses_count >= self.max_uses:
+            if raise_exception:
+                raise CouponUsageLimitException(self.code, self.max_uses)
             return False
+        
         return True
 
-    def can_apply(self, total_amount, ticket_type=None, cinema_name=None, movie_name=None, user_type=None):
-        if not self.is_valid():
+    def can_apply(self, total_amount, ticket_type=None, cinema_name=None, movie_name=None, user_type=None, raise_exception=False):
+       
+        if not self.is_valid(raise_exception=raise_exception):
             return False
+        
         if total_amount < self.min_purchase:
+            if raise_exception:
+                raise MinimumPurchaseException(self.code, self.min_purchase, total_amount)
             return False
+        
         if hasattr(self, 'applicable_ticket_types') and self.applicable_ticket_types and ticket_type not in self.applicable_ticket_types:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code, 
+                    f"Cupom não aplicável ao tipo de ingresso '{ticket_type}'"
+                )
             return False
+        
         if self.applicable_cinemas and cinema_name not in self.applicable_cinemas:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom não aplicável ao cinema '{cinema_name}'"
+                )
             return False
+        
         if self.applicable_movies and movie_name not in self.applicable_movies:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom não aplicável ao filme '{movie_name}'"
+                )
             return False
+        
         if self.user_type and user_type != self.user_type:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom exclusivo para usuários do tipo '{self.user_type}'"
+                )
             return False
+        
         return True
 
     def apply_discount(self, total_amount):
