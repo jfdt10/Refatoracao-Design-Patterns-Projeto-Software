@@ -101,6 +101,1033 @@ Este projeto implementa 10 padrões de design divididos em 3 categorias:
 
 ---
 
+### Tratamento de Exceções:
+
+Foi feito o tratamento de exceções com a criação de arquivo **exceptions.py** que centralizam as principais exceções customizadas da seguinte forma:
+
+**1. Exceções de Validação:**
+
+- Foi utilizada herança de ValueError para caracterizar essas exceções personalizadas criando 4 classes: `InvalidEmailException`,`InvalidPhoneException`, `InvalidCPFException`, `InvalidPasswordException`, seus usos se deram em arquivos como ui.py que centraliza a lógica dos menus a fim de validar na função de `registrar()` e em `models.py` nos setters das classe `USER` :
+
+
+```python
+def registrar()
+#......
+except InvalidEmailException as e:
+        print(f"Registration failed: {e}")
+except InvalidPhoneException as e:
+        print(f"Registration failed: {e}")
+except InvalidCPFException as e:
+        print(f"Registration failed: {e}")
+except InvalidPasswordException as e:
+        print(f"Registration failed: {e}")
+except (ValueError, TypeError) as e:
+        print(f"Registration failed: Invalid data format - {e}")
+```
+
+```python
+@email.setter
+    def email(self, new_email):
+        if not isinstance(new_email, str):
+            raise TypeError("Email must be a string.")
+        try:
+            validate_email(new_email)
+            self.__email = new_email.strip()
+        except InvalidEmailException:
+            raise  
+@password.setter
+    def password(self, new_password):
+        if not isinstance(new_password, str):
+            raise TypeError("Password must be a string.")
+        if len(new_password) < 5:
+            raise InvalidPasswordException("Password must have at least 5 characters.")
+        self.__password = new_password
+
+
+@phone.setter
+    def phone(self, new_phone):
+        if new_phone is None:
+            self.__phone = None
+            return
+        if not isinstance(new_phone, str):
+            raise TypeError("Phone must be a string.")
+        if new_phone.strip().startswith("()"):
+            raise InvalidPhoneException(new_phone, "Invalid phone (empty area code).")
+
+ @cpf.setter
+    def cpf(self, new_cpf):
+        if new_cpf is None:
+            self._cpf = None
+            return
+        
+        if not isinstance(new_cpf, str):
+            raise TypeError("CPF must be a string.")
+        try:
+            validate_cpf(new_cpf)
+            self._cpf = re.sub(r'\D', '', new_cpf)
+        except InvalidCPFException:
+            raise
+```
+**2. Exceções de Reserva:**
+- Foi utilizada herança de RunTimeError para caracterizar essas exceções personalizadas de Reserva criando 4 classes(1 que herda diretamente de RuntimeError e outras que herdam dessa): `BookingException`,`SeatAlreadyReservedException`, `ReservationExpiredException`, `SeatNotAvailableException`, seus usos se deram em arquivos como `states.py` arquivo que faz o padrão de projeto STATE usando nas classes `AvailableState`,`TemporaryReservedState` e `ConfirmedState`, no arquivo `commands.py` que implementa o padrão de projeto COMMAND nas classes `CommandInvoker` `PurchaseProductCommand` `CancelProductCommand` `PurchaseComboCommand`, além de `ui.py` em funções como ``finalize_purchase`, `comprar_ingresso()`, `cancelar_compra()` e no arquivo `main.py` na inicialização dos dados do programa:
+
+
+```python
+class AvailableState(SeatState):
+#...
+def confirm(self, seat):
+        raise SeatNotAvailableException(seat.row_and_number, "confirm")
+
+class TemporaryReservedState(SeatState):
+#...
+def check_expiry(self, seat):
+        if seat.reservation_expiry and datetime.now() >= seat.reservation_expiry:
+            expiry_time = seat.reservation_expiry
+            self.release(seat)
+            raise ReservationExpiredException(seat.row_and_number, expiry_time)
+        return False
+
+class ConfirmedState(SeatState):
+#...
+def reserve(self, seat, user, minutes=0):
+        raise SeatAlreadyReservedException(
+            seat.row_and_number,
+            "Confirmed"
+        )
+```
+
+
+```python
+class CommandInvoker:
+    ###...
+    def execute_command(self, command: Command):
+    #...
+     try:
+        command.execute()
+            if getattr(command, "executed", False):
+                self._history.append(command)
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during execution: {e}")
+
+    def undo_last(self)
+    #...
+    try:
+            command.undo()
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during undo: {e}")
+```
+
+```python
+class PurchaseProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand execute error: {e}")
+        self.executed = False
+        raise
+
+    def undo(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand undo error: {e}")
+```
+
+```python
+
+class CancelProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand execute error: {e}")
+        self.executed = False
+        raise
+    def undo(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand undo error: {e}")
+
+```
+
+```python
+class PurchaseComboCommand(Command):
+    #...
+    def execute(self):
+    #...
+        try:
+            for extra in extras:
+                cmd = PurchaseProductCommand(extra, self.user)
+                try:
+                    cmd.execute()
+                    if not getattr(cmd, "executed", False):
+                        print("PurchaseComboCommand: failed to purchase an extra. Rolling back extras...")
+                        for done in reversed(self._sub_commands):
+                            try:
+                                done.undo()
+                            except Exception:
+                                pass
+                        return
+                    self._sub_commands.append(cmd)
+                except (BookingException, PaymentException, CouponException) as e:
+                    print(f"PurchaseComboCommand: failed to purchase extra: {e}. Rolling back...")
+                    for done in reversed(self._sub_commands):
+                        try:
+                            done.undo()
+                        except Exception:
+                            pass
+                    raise
+        try:
+            result = None
+                try:
+                    result = self.finalize_fn(self.combo, self.movie, self.showtime, self.seat)
+                except TypeError:
+                    try:
+                        result = self.finalize_fn(self.combo, self.movie, self.showtime)
+                    except Exception:
+                        raise
+                
+                if result is False:
+                    raise BookingException("finalize function indicated failure")
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"PurchaseComboCommand: finalize failed: {e}. Rolling back extras...")
+                for done in reversed(self._sub_commands):
+                    try:
+                        done.undo()
+                    except Exception:
+                        pass
+                raise
+
+            self.executed = True
+            
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"PurchaseComboCommand execute error: {e}")
+            for done in reversed(self._sub_commands):
+                try:
+                    done.undo()
+                except Exception:
+                    pass
+            self.executed = False
+            raise
+```
+
+```python
+    def finalize_purchase(combo, movie, showtime, seat):
+    #...
+    try:
+            if seat.confirm():
+                print(f"Seat {seat.row_and_number} is now {seat.get_status()}.")
+            else:
+                print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
+                return False
+        except SeatNotAvailableException as e:
+            print(f"Error confirming seat: {e}")
+            return False
+    try:
+            combo.ticket.extras = combo.extras
+            
+            combo.ticket.purchase_product(state.usuario_logado)
+            
+            for extra in combo.extras:
+                if hasattr(extra, 'purchase_product'):
+                    extra.purchase_product(state.usuario_logado)
+
+            state.usuario_logado.add_booking(combo.ticket)
+    #...
+
+    except (BookingException, PaymentException, CouponException) as e:
+            print(f"Error finalizing purchase: {e}")
+            return False
+
+    def comprar_ingresso(movie):
+    #...
+    try:
+        if assento_selecionado.temp_reserve(state.usuario_logado, minutes=10):
+            print(f"Seat {assento_selecionado.row_and_number} temporarily reserved until {assento_selecionado.reservation_expiry}.")
+                break
+        else:
+                    print("Could not reserve seat. Please try another one.")
+    except SeatAlreadyReservedException as e:
+        print(f"Reservation error: {e}")
+        continue
+
+    try:
+        combo = builder.build()
+        print(f"\nPurchase Summary:")
+        print(f" Movie: {movie.name}")
+        print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
+        print(f" Seat: {assento_selecionado.row_and_number}")
+        print(f" Ticket: {combo.ticket.name} - R$ {combo.ticket.price:.2f}")
+        if combo.extras:
+            for extra in combo.extras:
+                print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
+        print(f" Total: R$ {combo.total_price:.2f}")
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Error building combo: {e}")
+        assento_selecionado.release(state.usuario_logado)
+        return
+    
+     try:
+            if assento_selecionado.check_expiry():
+                print("Your temporary reservation has expired. Please start over.")
+                return
+        except ReservationExpiredException as e:
+            try:
+                assento_selecionado.release(state.usuario_logado)
+            except Exception:
+                pass
+            print(f"Reservation expired: {e}. Please start over.")
+            return
+     try:
+                cinema_system.invoker.execute_command(cmd)
+                if not getattr(cmd, "executed", False):
+                    print("Purchase failed. Seat will be released.")
+                    assento_selecionado.release(state.usuario_logado)
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"Purchase error: {e}. Seat will be released.")
+                try:
+                    assento_selecionado.release(state.usuario_logado)
+                    print(f"Seat {assento_selecionado.row_and_number} released.")
+                except (BookingException, SeatNotAvailableException) as e2:
+                    print(f"Warning: Could not release seat: {e2}")
+    def cancelar_compra():
+    #...
+    try:
+        cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+    except (BookingException, PaymentException, CouponException) as e:
+                print(f"Warning: Failed to cancel extra '{extra.name}': {e}")
+    #...
+     try:
+        cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
+        cinema_system.invoker.execute_command(cmd_ticket)
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Warning: Failed to cancel ticket: {e}")
+```
+
+
+```python
+try:
+    inicializar_dados()
+    menu_principal()
+except KeyboardInterrupt:
+    print("\n\nProgram interrupted by user.")
+except (BookingException, PaymentException, CouponException) as e:
+    print(f"Error: {e}")
+finally:
+    print("See you next time!")
+    sys.exit(0)
+```
+
+**3. Exceções de Pagamento:**
+- Foi utilizada herança de RunTimeError para caracterizar essas exceções personalizadas de Pagamento criando 4 classes(1 que herda diretamente de RuntimeError e outras que herdam dessa): `PaymentException`,`PaymentLimitExceededException`, `PaymentProcessingException`, `InvalidPaymentMethodException`, seus usos se deram em arquivos como `Facade.py` arquivo que faz o padrão de projeto FACADE usando nas classes `PaymentSubsystem`,`CinemaSystemFacade`, e em `commands.py` que implementa o padrão de projeto COMMAND nas classes `CommandInvoker` `PurchaseProductCommand` `CancelProductCommand` `PurchaseComboCommand`, além de `ui.py` em funções como `payment()``finalize_purchase()`, `comprar_ingresso()`, `cancelar_compra()` e no arquivo `main.py` na inicialização dos dados do programa:
+
+
+```python
+class PaymentSubsystem:
+#...
+
+def process_payment(self, method: str, amount: float, user):
+#...
+
+if method not in method_mapping:
+    raise InvalidPaymentMethodException(
+                method, valid_methods=["Credit", "Debit", "PIX"]
+            )
+        
+        method_key = method_mapping[method]
+        limit = PAYMENT_LIMITS[method_key]
+
+ if amount > limit:
+            raise PaymentLimitExceededException(
+                payment_method=method_key.upper(),
+                amount=amount,
+                limit=limit
+            )
+if random.random() < PAYMENT_ERROR_RATE:
+            raise PaymentProcessingException(
+                "Error connecting to payment server",
+                details="Please try again in a few seconds"
+            )
+
+class CinemaSystemFacade:
+#...
+try:
+#...
+except (PaymentLimitExceededException, PaymentProcessingException, 
+                    InvalidPaymentMethodException) as e:
+                result["message"] = str(e)
+                self.bookings.release_seat(seat, user)
+                return result
+```
+
+
+```python
+class CommandInvoker:
+    ###...
+    def execute_command(self, command: Command):
+    #...
+     try:
+        command.execute()
+            if getattr(command, "executed", False):
+                self._history.append(command)
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during execution: {e}")
+
+    def undo_last(self)
+    #...
+    try:
+            command.undo()
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during undo: {e}")
+```
+
+```python
+class PurchaseProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand execute error: {e}")
+        self.executed = False
+        raise
+
+    def undo(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand undo error: {e}")
+```
+
+```python
+
+class CancelProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand execute error: {e}")
+        self.executed = False
+        raise
+    def undo(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand undo error: {e}")
+
+```
+
+```python
+class PurchaseComboCommand(Command):
+    #...
+    def execute(self):
+    #...
+        try:
+            for extra in extras:
+                cmd = PurchaseProductCommand(extra, self.user)
+                try:
+                    cmd.execute()
+                    if not getattr(cmd, "executed", False):
+                        print("PurchaseComboCommand: failed to purchase an extra. Rolling back extras...")
+                        for done in reversed(self._sub_commands):
+                            try:
+                                done.undo()
+                            except Exception:
+                                pass
+                        return
+                    self._sub_commands.append(cmd)
+                except (BookingException, PaymentException, CouponException) as e:
+                    print(f"PurchaseComboCommand: failed to purchase extra: {e}. Rolling back...")
+                    for done in reversed(self._sub_commands):
+                        try:
+                            done.undo()
+                        except Exception:
+                            pass
+                    raise
+        try:
+            result = None
+                try:
+                    result = self.finalize_fn(self.combo, self.movie, self.showtime, self.seat)
+                except TypeError:
+                    try:
+                        result = self.finalize_fn(self.combo, self.movie, self.showtime)
+                    except Exception:
+                        raise
+                
+                if result is False:
+                    raise BookingException("finalize function indicated failure")
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"PurchaseComboCommand: finalize failed: {e}. Rolling back extras...")
+                for done in reversed(self._sub_commands):
+                    try:
+                        done.undo()
+                    except Exception:
+                        pass
+                raise
+
+            self.executed = True
+            
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"PurchaseComboCommand execute error: {e}")
+            for done in reversed(self._sub_commands):
+                try:
+                    done.undo()
+                except Exception:
+                    pass
+            self.executed = False
+            raise
+```
+```python
+def payment(valor):
+try:
+#...
+except (PaymentLimitExceededException, PaymentProcessingException, InvalidPaymentMethodException) as e:
+        print(f"Payment error: {e}")
+        retry = input("Try again? [Y/N]: ").strip().upper()
+        if retry != "Y":
+            return False
+else:
+    print("Invalid credit card number. Please try again.")
+```
+
+
+```python
+    def finalize_purchase(combo, movie, showtime, seat):
+    #...
+    try:
+            if seat.confirm():
+                print(f"Seat {seat.row_and_number} is now {seat.get_status()}.")
+            else:
+                print(f"Could not confirm seat {seat.row_and_number}. Current status: {seat.get_status()}")
+                return False
+        except SeatNotAvailableException as e:
+            print(f"Error confirming seat: {e}")
+            return False
+    try:
+            combo.ticket.extras = combo.extras
+            
+            combo.ticket.purchase_product(state.usuario_logado)
+            
+            for extra in combo.extras:
+                if hasattr(extra, 'purchase_product'):
+                    extra.purchase_product(state.usuario_logado)
+
+            state.usuario_logado.add_booking(combo.ticket)
+    #...
+
+    except (BookingException, PaymentException, CouponException) as e:
+            print(f"Error finalizing purchase: {e}")
+            return False
+
+    def comprar_ingresso(movie):
+    #...
+    try:
+        if assento_selecionado.temp_reserve(state.usuario_logado, minutes=10):
+            print(f"Seat {assento_selecionado.row_and_number} temporarily reserved until {assento_selecionado.reservation_expiry}.")
+                break
+        else:
+                    print("Could not reserve seat. Please try another one.")
+    except SeatAlreadyReservedException as e:
+        print(f"Reservation error: {e}")
+        continue
+
+    try:
+        combo = builder.build()
+        print(f"\nPurchase Summary:")
+        print(f" Movie: {movie.name}")
+        print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
+        print(f" Seat: {assento_selecionado.row_and_number}")
+        print(f" Ticket: {combo.ticket.name} - R$ {combo.ticket.price:.2f}")
+        if combo.extras:
+            for extra in combo.extras:
+                print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
+        print(f" Total: R$ {combo.total_price:.2f}")
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Error building combo: {e}")
+        assento_selecionado.release(state.usuario_logado)
+        return
+    
+     try:
+            if assento_selecionado.check_expiry():
+                print("Your temporary reservation has expired. Please start over.")
+                return
+        except ReservationExpiredException as e:
+            try:
+                assento_selecionado.release(state.usuario_logado)
+            except Exception:
+                pass
+            print(f"Reservation expired: {e}. Please start over.")
+            return
+     try:
+                cinema_system.invoker.execute_command(cmd)
+                if not getattr(cmd, "executed", False):
+                    print("Purchase failed. Seat will be released.")
+                    assento_selecionado.release(state.usuario_logado)
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"Purchase error: {e}. Seat will be released.")
+                try:
+                    assento_selecionado.release(state.usuario_logado)
+                    print(f"Seat {assento_selecionado.row_and_number} released.")
+                except (BookingException, SeatNotAvailableException) as e2:
+                    print(f"Warning: Could not release seat: {e2}")
+    def cancelar_compra():
+    #...
+    try:
+        cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+    except (BookingException, PaymentException, CouponException) as e:
+                print(f"Warning: Failed to cancel extra '{extra.name}': {e}")
+    #...
+     try:
+        cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
+        cinema_system.invoker.execute_command(cmd_ticket)
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Warning: Failed to cancel ticket: {e}")
+```
+
+
+```python
+try:
+    inicializar_dados()
+    menu_principal()
+except KeyboardInterrupt:
+    print("\n\nProgram interrupted by user.")
+except (BookingException, PaymentException, CouponException) as e:
+    print(f"Error: {e}")
+finally:
+    print("See you next time!")
+    sys.exit(0)
+```
+
+**3. Exceções de Cupom:**
+- Foi utilizada herança de RunTimeError para caracterizar essas exceções personalizadas de Cupom criando 5 classes(1 que herda diretamente de RuntimeError e outras que herdam dessa): `CouponException`,`InvalidCouponException`, `CouponExpiredException`, `CouponUsageLimitException`e `MinimumPurchaseException` seus usos se deram em arquivos como `serivces.py` arquivo que faz o padrão de projeto Singleton usando nas classes `Coupon`, e em `commands.py` que implementa o padrão de projeto COMMAND nas classes `CommandInvoker` `PurchaseProductCommand` `CancelProductCommand` `PurchaseComboCommand`, além de `ui.py` em funções como `finalize_purchase()`, `comprar_ingresso()`, `cancelar_compra()` e no arquivo `main.py` na inicialização dos dados do programa:
+
+
+```python
+class Coupon:
+#...
+
+def is_valid(self, raise_exception=False):
+if not self.is_active:
+     if raise_exception:
+            raise InvalidCouponException(self.code, "Cupom está inativo")
+        return False
+        
+    if self.valid_until and datetime.now() > self.valid_until:
+        if raise_exception:
+            raise CouponExpiredException(self.code, self.valid_until)
+        return False
+        
+    if self.max_uses and self.uses_count >= self.max_uses:
+        if raise_exception:
+            raise CouponUsageLimitException(self.code, self.max_uses)
+        return False
+    return True
+
+def can_apply(self, total_amount, ticket_type=None, cinema_name=None, movie_name=None, user_type=None, raise_exception=False):
+if total_amount < self.min_purchase:
+            if raise_exception:
+                raise MinimumPurchaseException(self.code, self.min_purchase, total_amount)
+            return False
+        
+        if hasattr(self, 'applicable_ticket_types') and self.applicable_ticket_types and ticket_type not in self.applicable_ticket_types:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code, 
+                    f"Cupom não aplicável ao tipo de ingresso '{ticket_type}'"
+                )
+            return False
+        
+        if self.applicable_cinemas and cinema_name not in self.applicable_cinemas:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom não aplicável ao cinema '{cinema_name}'"
+                )
+            return False
+        
+        if self.applicable_movies and movie_name not in self.applicable_movies:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom não aplicável ao filme '{movie_name}'"
+                )
+            return False
+        
+        if self.user_type and user_type != self.user_type:
+            if raise_exception:
+                raise InvalidCouponException(
+                    self.code,
+                    f"Cupom exclusivo para usuários do tipo '{self.user_type}'"
+                )
+            return False
+        
+        return True
+#...
+```
+```python
+ try:
+        combo = builder.build()
+        print(f"\nPurchase Summary:")
+        print(f" Movie: {movie.name}")
+        print(f" Session: {showtime_selecionado.time} - Room {showtime_selecionado.screen_number}")
+        print(f" Seat: {assento_selecionado.row_and_number}")
+        print(f" Ticket: {combo.ticket.name} - R$ {combo.ticket.price:.2f}")
+        if combo.extras:
+            for extra in combo.extras:
+                print(f" Extra: {extra.name} - R$ {extra.price:.2f}")
+        print(f" Total: R$ {combo.total_price:.2f}")
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Error building combo: {e}")
+        assento_selecionado.release(state.usuario_logado)
+        return
+    
+     try:
+            if assento_selecionado.check_expiry():
+                print("Your temporary reservation has expired. Please start over.")
+                return
+        except ReservationExpiredException as e:
+            try:
+                assento_selecionado.release(state.usuario_logado)
+            except Exception:
+                pass
+            print(f"Reservation expired: {e}. Please start over.")
+            return
+     try:
+                cinema_system.invoker.execute_command(cmd)
+                if not getattr(cmd, "executed", False):
+                    print("Purchase failed. Seat will be released.")
+                    assento_selecionado.release(state.usuario_logado)
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"Purchase error: {e}. Seat will be released.")
+                try:
+                    assento_selecionado.release(state.usuario_logado)
+                    print(f"Seat {assento_selecionado.row_and_number} released.")
+                except (BookingException, SeatNotAvailableException) as e2:
+                    print(f"Warning: Could not release seat: {e2}")
+    def cancelar_compra():
+    #...
+    try:
+        cinema_system.invoker.execute_command(CancelProductCommand(extra, state.usuario_logado))
+    except (BookingException, PaymentException, CouponException) as e:
+                print(f"Warning: Failed to cancel extra '{extra.name}': {e}")
+    #...
+     try:
+        cmd_ticket = CancelProductCommand(ticket, state.usuario_logado)
+        cinema_system.invoker.execute_command(cmd_ticket)
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Warning: Failed to cancel ticket: {e}")
+```
+
+
+```python
+class CommandInvoker:
+    ###...
+    def execute_command(self, command: Command):
+    #...
+     try:
+        command.execute()
+            if getattr(command, "executed", False):
+                self._history.append(command)
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during execution: {e}")
+
+    def undo_last(self)
+    #...
+    try:
+            command.undo()
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"[COMMAND ERROR] Business logic error during undo: {e}")
+```
+
+```python
+class PurchaseProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand execute error: {e}")
+        self.executed = False
+        raise
+
+    def undo(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"PurchaseProductCommand undo error: {e}")
+```
+
+```python
+
+class CancelProductCommand(Command):
+    #...
+    def execute(self):
+    #...
+    try:
+        self.product.cancel_purchase(self.user)
+        self.executed = True
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand execute error: {e}")
+        self.executed = False
+        raise
+    def undo(self):
+    #...
+    try:
+        self.product.purchase_product(self.user)
+        self.executed = False
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"CancelProductCommand undo error: {e}")
+
+```
+
+```python
+class PurchaseComboCommand(Command):
+    #...
+    def execute(self):
+    #...
+        try:
+            for extra in extras:
+                cmd = PurchaseProductCommand(extra, self.user)
+                try:
+                    cmd.execute()
+                    if not getattr(cmd, "executed", False):
+                        print("PurchaseComboCommand: failed to purchase an extra. Rolling back extras...")
+                        for done in reversed(self._sub_commands):
+                            try:
+                                done.undo()
+                            except Exception:
+                                pass
+                        return
+                    self._sub_commands.append(cmd)
+                except (BookingException, PaymentException, CouponException) as e:
+                    print(f"PurchaseComboCommand: failed to purchase extra: {e}. Rolling back...")
+                    for done in reversed(self._sub_commands):
+                        try:
+                            done.undo()
+                        except Exception:
+                            pass
+                    raise
+        try:
+                result = None
+                try:
+                    result = self.finalize_fn(self.combo, self.movie, self.showtime, self.seat)
+                except TypeError:
+                    try:
+                        result = self.finalize_fn(self.combo, self.movie, self.showtime)
+                    except Exception:
+                        raise
+                
+                if result is False:
+                    raise BookingException("finalize function indicated failure")
+            except (BookingException, PaymentException, CouponException) as e:
+                print(f"PurchaseComboCommand: finalize failed: {e}. Rolling back extras...")
+                for done in reversed(self._sub_commands):
+                    try:
+                        done.undo()
+                    except Exception:
+                        pass
+                raise
+
+            self.executed = True
+            
+        except (BookingException, PaymentException, CouponException) as e:
+            print(f"PurchaseComboCommand execute error: {e}")
+            for done in reversed(self._sub_commands):
+                try:
+                    done.undo()
+                except Exception:
+                    pass
+            self.executed = False
+            raise
+```
+
+```python
+try:
+    inicializar_dados()
+    menu_principal()
+except KeyboardInterrupt:
+    print("\n\nProgram interrupted by user.")
+except (BookingException, PaymentException, CouponException) as e:
+    print(f"Error: {e}")
+finally:
+    print("See you next time!")
+    sys.exit(0)
+```
+
+**4. Exceções de Notiicação:**
+- Foi utilizada herança de RunTimeError para caracterizar essas exceções personalizadas de Cupom criando 3 classes(1 que herda diretamente de RuntimeError e outras que herdam dessa): `NotificationException`,`NotificationDeliveryException`, `InvalidNotificationChannelException` seus usos se deram em services.py que implementa Singleton de Funções de Notificações e em ui.py:
+
+```python
+class MultiChannelNotificationService(metaclass=MetaSingleton):
+#...
+for channel_name in channels:
+            if channel_name not in self.channels:
+                raise InvalidNotificationChannelException(
+                    channel_name, 
+                    list(self.channels.keys())
+                )
+
+ if failed_channels and len(failed_channels) == len(channels):
+            raise NotificationDeliveryException(
+                ", ".join(failed_channels),
+                "Falha em todos os canais de notificação"
+            )
+```
+
+```python
+
+def add_movie_admin():
+#...
+ try:
+     event_bus.publish(NEW_MOVIE, {
+                "movie_name": new_movie.name,
+                "cinema_name": cinema.name,
+                "genre": new_movie.genre,
+                "targets": targets,
+                "channels": selected_channels
+            })
+            print(f"New movie notification sent via channels: {', '.join(selected_channels)}.")
+        except NotificationDeliveryException as e:
+            print(f"Warning: Notification delivery issue - {e}")
+        except Exception as e:
+            print(f"Warning: Failed to send notifications - {e}")
+            
+    except KeyboardInterrupt:
+        print("\nOperation canceled by user.")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+```
+
+**5. Exceções de Autenticação:**
+- Foi utilizada herança de RunTimeError para caracterizar essas exceções personalizadas de Cupom criando 4 classes(1 que herda diretamente de RuntimeError e outras que herdam dessa): `AuthenticationException`,`InvalidCredentialsException`, `UserNotFoundException`, `UnauthorizedAccessException` seus usos se deram em arquivo  `ui.py` em funções de admin e funções de processar login:
+
+
+```python
+def processar_login():
+#...
+try:
+     login_user = input("Login: ").strip()
+        password_user = input("Password: ").strip()
+        
+        if not login_user or not password_user:
+            print("Error: Login and password cannot be empty.")
+            return
+        
+        if login_user not in state.usuarios_registrados:
+            raise UserNotFoundException(login_user)
+        
+        if state.usuarios_registrados[login_user].password != password_user:
+            raise InvalidCredentialsException(login_user)
+        
+        state.usuario_logado = state.usuarios_registrados[login_user]
+        print(f"Login successful! Welcome, {state.usuario_logado.name}.")
+        
+ except UserNotFoundException as e:
+    print(f"Error: {e}")
+except InvalidCredentialsException as e:
+    print(f"Error: {e}")
+except KeyboardInterrupt:
+    print("\nLogin canceled.")
+except Exception as e:
+    print(f"Unexpected error during login: {e}")
+
+
+def add_showtime_admin()
+#...
+
+try:
+     if "manage_movies" not in state.usuario_logado.permissions:
+        raise UnauthorizedAccessException(
+        state.usuario_logado.login if hasattr(state.usuario_logado, 'login') else "unknown",
+        "manage_movies"
+        )
+except UnauthorizedAccessException as e:
+    print(f"Access denied: {e}")
+    return
+```
+
+**6. Exceções Built-ins do Python:**
+- Foi utilizado em diversos arquivos a exemplo de `ui.py`em função de `menu_notificacoes()` em `main.py`, `models.py` e outros como em propertys e setters de atributos da classe `USER`, entre outros.
+
+
+
+
+
+```python
+def menu_notifications():
+#...
+try:
+    notif_choice = int(input("Enter the notification number to mark as read: "))
+    if 1 <= notif_choice <= len(notifications):
+        notification_id = notifications[notif_choice - 1]['id']
+        if notification_service.mark_as_read(notification_id):
+             print("Notification marked as read.")
+        else:
+            print("Could not find notification.")
+     else:
+        print("Invalid number.")
+except (ValueError, TypeError):
+    print("Invalid input. Please enter a valid number.")
+
+```
+
+```python
+class USER:
+#...
+def cpf(self, new_cpf):
+        if new_cpf is None:
+            self._cpf = None
+            return
+        
+        if not isinstance(new_cpf, str):
+            raise TypeError("CPF must be a string.")
+        try:
+            validate_cpf(new_cpf)
+            self._cpf = re.sub(r'\D', '', new_cpf)
+        except InvalidCPFException:
+            raise
+```
+
+```python
+if __name__ == "__main__":
+    try:
+        inicializar_dados()
+        menu_principal()
+    except KeyboardInterrupt:
+        print("\n\nProgram interrupted by user.")
+    except (BookingException, PaymentException, CouponException) as e:
+        print(f"Error: {e}")
+    finally:
+        print("See you next time!")
+        sys.exit(0)
+```
+
 ### Conceitos de POO Aplicados
 
 O projeto foi construído sobre os pilares fundamentais da Programação Orientada a Objetos:

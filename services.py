@@ -151,7 +151,6 @@ class Coupon:
             if raise_exception:
                 raise CouponUsageLimitException(self.code, self.max_uses)
             return False
-        
         return True
 
     def can_apply(self, total_amount, ticket_type=None, cinema_name=None, movie_name=None, user_type=None, raise_exception=False):

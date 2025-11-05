@@ -209,7 +209,7 @@ class UnauthorizedAccessException(AuthenticationException):
 
 
 # ---------- EXCEÇÕES DE SERVIÇOS EXTERNOS (herdam de ConnectionError) ----------
-
+"""
 class ServiceUnavailableException(ConnectionError):
     def __init__(self, service_name, details=None):
         self.service_name = service_name
@@ -218,6 +218,8 @@ class ServiceUnavailableException(ConnectionError):
         if details:
             message += f": {details}"
         super().__init__(message)
+""" # Não usei essa exceção no projeto, mas deixei aqui comentada caso precise futuramente.
+
 
 
 # ------------ FUNÇÕES DE VALIDAÇÃO --------------------
